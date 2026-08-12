@@ -1,0 +1,64 @@
+# skrecon / birdseye — example configuration.
+#
+# Layered precedence (lowest to highest):
+#   built-in defaults  ->  this file  ->  environment (SKRECON_*)  ->  CLI flags
+#
+# Secrets NEVER live here — API keys come from the environment / .env only.
+# Copy to `skrecon.toml` and adjust.
+
+# Where engagement directories are written (one subdir per engagement id).
+output_dir = "engagements"
+
+# Client organization / brand for passive OSINT that is broader than scope.txt
+# (breach search, harvesting, typosquatting). Passive-only; never used to widen
+# the ACTIVE target set.
+client = "Example Corp"
+
+# Extra client-owned root domains / brand keywords to widen PASSIVE collection.
+client_root_domains = ["example.com", "example.net"]
+client_keywords = ["examplecorp", "exmpl"]
+
+# ---- Scope handling ----
+# When true, a discovered subdomain of a listed domain is treated as in-scope for
+# ACTIVE modules even if its IP is not in a listed network. Default false (safe):
+# a discovered host is active-eligible only if explicitly listed OR it resolves to
+# an in-scope IP network.
+include_subdomains = false
+
+# Cap on expanding CIDR ranges into individual host targets. Membership checks are
+# unaffected; this only bounds per-host target enumeration. Override for large scopes.
+max_expanded_hosts = 65536
+
+# ---- Intrusive / active-adjacent toggles (opt-in, off by default) ----
+enable_axfr = false   # zone-transfer attempts touch client nameservers -> gated like ACTIVE
+enable_udp  = false   # UDP scanning is slow/disruptive -> top-ports only when enabled
+
+# ---- Sensitive-data retention ----
+# Breach/persona PII is stored encrypted-at-rest and excluded from report bodies.
+# `skrecon engagement close` auto-purges raw PII after this many days (counts kept).
+retention_days = 90
+
+# ---- Conservative default rates (be polite by default) ----
+[rates]
+masscan_pps      = 1000     # hard warning above 20000
+nmap_timing      = "T3"
+nmap_max_rate    = 200      # packets/sec ceiling passed to nmap
+http_concurrency = 8
+api_concurrency  = 2        # respect Shodan/DeHashed quotas
+
+# ---- Module enable/disable (module name -> bool). Omitted = default_enabled. ----
+[modules]
+# nuclei is off by default even when the binary is present.
+nuclei = false
+
+# ---- Blackout windows: no ACTIVE scanning during these. ----
+# Absolute ranges (ISO 8601) and/or recurring daily windows with weekdays.
+# [[blackout]]
+# start = "2026-08-20T00:00:00Z"
+# end   = "2026-08-21T06:00:00Z"
+#
+# [[blackout]]
+# daily_start = "17:00"
+# daily_end   = "23:59"
+# weekdays    = ["Mon", "Tue", "Wed", "Thu", "Fri"]   # business hours protected
+# tz          = "UTC"

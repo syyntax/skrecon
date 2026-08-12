@@ -1,0 +1,51 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "skrecon"
+version = "0.1.0"
+description = "birdseye — authorized recon orchestrator for Stormkeep penetration-testing engagements"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary — Stormkeep internal" }
+authors = [{ name = "Stormkeep" }]
+
+# The safety-critical core (scope parser, scope guard, config, data model, audit,
+# store) is deliberately stdlib-only so it runs and tests with zero third-party
+# installs. Only the CLI layer needs typer.
+dependencies = [
+    "typer>=0.12",
+    # IANA tz database for non-UTC blackout windows on platforms without a system
+    # copy (e.g. Windows). UTC needs no tz data, so the stdlib-only core still runs
+    # and tests without this installed.
+    "tzdata; platform_system == 'Windows'",
+]
+
+[project.optional-dependencies]
+# Phase 1–2 (passive) tool bindings — installed when those modules land.
+passive = [
+    "dnspython>=2.6",
+    "python-whois>=0.9",
+    "shodan>=1.31",
+    "dnstwist>=20240",
+    "requests>=2.32",
+]
+# Phase 3–4 (active) tool bindings. External binaries (masscan, nmap, subfinder,
+# gowitness, nuclei, wafw00f) are provided by the Docker image, not pip.
+active = [
+    "sslyze>=6.0",
+]
+dev = [
+    "pytest>=8.0",
+]
+
+[project.scripts]
+skrecon = "skrecon.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/skrecon"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

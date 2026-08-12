@@ -1,0 +1,7 @@
+# Normalize line endings: store LF in the repository and check out LF everywhere,
+# so the repo stays consistent across Windows/macOS/Linux and no CRLF churn appears.
+* text=auto eol=lf
+
+# Binary types git should never touch.
+*.png binary
+*.db binary

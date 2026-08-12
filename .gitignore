@@ -1,0 +1,35 @@
+# ---- Secrets (NEVER commit) ----
+.env
+.env.*
+!.env.example
+*.secret
+secrets.toml
+skrecon.local.toml
+
+# ---- Engagement output (contains scope, findings, and PII) ----
+# Engagement directories hold breach/persona data and client-sensitive results.
+# They must never be committed. Keep them out of the repo entirely.
+engagements/
+*.db
+*.db-wal
+*.db-shm
+*.vault
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- Editors / OS ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

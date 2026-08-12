@@ -1,0 +1,16 @@
+# Sample scope.txt for a benign, authorized demo engagement.
+# Uses only documentation/reserved ranges (RFC 5737 IPv4, RFC 3849 IPv6) and
+# example.com (RFC 2606), so nothing here is a real, routable target.
+
+example.com
+www.example.com
+https://app.example.com/login        # scheme + path are stripped to the host
+mail.example.com:25                  # host:port -> host
+
+192.0.2.0/24                         # TEST-NET-1
+198.51.100.10                        # TEST-NET-2 (single host)
+203.0.113.0/28                       # TEST-NET-3 (16 addresses)
+2001:db8:abcd::/48                   # IPv6 documentation prefix
+
+# Lines below are intentionally excluded from scope:
+# partner.thirdparty.example.net     # third-party asset — must NOT be scanned
