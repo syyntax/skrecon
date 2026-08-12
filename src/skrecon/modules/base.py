@@ -10,6 +10,7 @@ network except through those.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Iterable, Optional, Protocol, runtime_checkable
 
 from ..audit import AuditLog
@@ -68,6 +69,7 @@ class Context:
     http_passive: PassiveHttp
     cache: Cache
     vault: EncryptedVault
+    raw_dir: Path                        # preserve native tool output here (spec §7)
     scratch: dict[str, Any] = field(default_factory=dict)
 
 

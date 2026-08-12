@@ -78,6 +78,11 @@ class Settings:
     dns_nameservers: list[str] = field(default_factory=list)  # empty = system resolvers
     http_timeout: float = 15.0
     cache_ttl_hours: int = 168           # 7 days; caches expensive OSINT lookups
+    # active phase (Phase 3+)
+    masscan_ports: str = (
+        "21,22,23,25,53,80,110,111,135,139,143,443,445,465,587,993,995,1433,"
+        "1723,3306,3389,5432,5900,6379,8080,8443,8000,8888,9200,27017"
+    )
     rates: RateConfig = field(default_factory=RateConfig)
     modules: dict[str, bool] = field(default_factory=dict)   # explicit enable/disable
     blackout: list[dict[str, Any]] = field(default_factory=list)
@@ -113,7 +118,7 @@ class Settings:
 
         if "output_dir" in data:
             self.output_dir = Path(str(data["output_dir"]))
-        for key in ("client",):
+        for key in ("client", "masscan_ports"):
             if key in data:
                 setattr(self, key, str(data[key]))
         for key in ("client_root_domains", "client_keywords"):

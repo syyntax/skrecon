@@ -58,15 +58,22 @@ class ScopeGuard:
 
     def is_in_scope(self, target: str, *, resolved_ips: Optional[list[str]] = None) -> bool:
         host = _extract_target_host(target)
+
+        # 1) IP or CIDR range (masscan/nmap targets). A single address is a /32 or
+        #    /128; a wider prefix is a range that must be fully within scope.
         try:
-            ipaddress.ip_address(host)
-            return self.scope.contains_ip(host)
+            netw = ipaddress.ip_network(host, strict=False)
         except ValueError:
-            pass
-        # hostname path
+            netw = None
+        if netw is not None:
+            if netw.prefixlen < netw.max_prefixlen:
+                return self.scope.contains_network(netw)
+            return self.scope.contains_ip(str(netw.network_address))
+
+        # 2) hostname (exact, or subdomain when enabled)
         if self.scope.contains_host(host, include_subdomains=self.include_subdomains):
             return True
-        # rule (3): a host that resolves to an in-scope IP is eligible
+        # 3) a host that resolves to an in-scope IP is eligible
         if resolved_ips:
             return any(self.scope.contains_ip(ip) for ip in resolved_ips)
         return False

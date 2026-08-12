@@ -101,3 +101,12 @@ def test_skipped_module_not_run(tmp_path):
     results = run_phase(ctx, [mod])
     assert results[0].status == "skipped"
     assert mod.ran == 0
+
+
+def test_dry_run_plans_even_when_not_ready(tmp_path):
+    # A tool that only exists in Docker (masscan) still shows its plan in dry-run.
+    ctx = make_ctx(tmp_path)
+    mod = FakeModule("masscan", ready=False)
+    results = run_phase(ctx, [mod], dry_run=True)
+    assert results[0].status == "planned"
+    assert mod.ran == 0

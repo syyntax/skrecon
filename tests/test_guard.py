@@ -61,6 +61,15 @@ def test_subdomain_only_when_enabled():
     assert not guard_on.is_in_scope("example.com.attacker.net")
 
 
+def test_cidr_targets_for_active_scanning():
+    # scope = example.com + 203.0.113.0/28
+    guard, _ = make_guard()
+    assert guard.is_in_scope("203.0.113.0/28")       # the authorized network itself
+    assert guard.is_in_scope("203.0.113.0/29")       # a subnet within it
+    assert not guard.is_in_scope("203.0.113.0/24")   # BROADER than authorized -> refused
+    assert not guard.is_in_scope("10.0.0.0/8")       # unrelated range -> refused
+
+
 def test_resolved_ip_rule():
     guard, _ = make_guard()
     # A non-listed host that resolves INTO an in-scope network is eligible...

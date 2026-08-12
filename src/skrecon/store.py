@@ -405,6 +405,14 @@ class EngagementStore:
     def list_hosts(self) -> list[dict[str, Any]]:
         return [dict(r) for r in self.conn.execute("SELECT * FROM host_ip ORDER BY ip").fetchall()]
 
+    def list_services(self, source: Optional[str] = None) -> list[dict[str, Any]]:
+        if source:
+            rows = self.conn.execute(
+                "SELECT * FROM service WHERE source=? ORDER BY host_ip, port", (source,)).fetchall()
+        else:
+            rows = self.conn.execute("SELECT * FROM service ORDER BY host_ip, port").fetchall()
+        return [dict(r) for r in rows]
+
     def list_domains(self) -> list[dict[str, Any]]:
         return [dict(r) for r in self.conn.execute("SELECT * FROM domain ORDER BY fqdn").fetchall()]
 

@@ -30,3 +30,7 @@ from . import subdomains      # noqa: F401,E402  registers "subdomains"
 from . import shodan_exp      # noqa: F401,E402  registers "shodan"
 from . import dehashed        # noqa: F401,E402  registers "dehashed"
 from . import harvester       # noqa: F401,E402  registers "harvester"
+
+# Phase 3 — active discovery
+from . import masscan_scan    # noqa: F401,E402  registers "masscan"
+from . import nmap_scan       # noqa: F401,E402  registers "nmap"

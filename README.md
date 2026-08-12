@@ -23,7 +23,7 @@ Built in phases (spec §12). Current state:
 | **0** | config/secrets, scope parser+normalizer, engagement metadata, **scope guard**, authorization gate, blackout windows, audit log, data model, dry-run, preflight | **✅ implemented** |
 | **1** | passive DNS / reverse-DNS / WHOIS-RDAP (+expiry) / mail-posture (SPF/DMARC/DKIM/MTA-STS/TLS-RPT/BIMI) / typosquat, plus the passive pipeline, resolver, HTTP client, cache & findings catalog | **✅ implemented** |
 | **2** | passive CT subdomains (crt.sh + certspotter fallback) / subdomain aggregation & resolution / Shodan / theHarvester / DeHashed, plus the **encrypted PII vault** (Fernet) and `engagement close`/`status` with retention auto-purge | **✅ implemented** |
-| 3 | active masscan → nmap → services | planned |
+| **3** | active masscan → nmap (`-sV -O -oA`) → normalized services, behind the authorization gate; scope guard extended to validate in-scope CIDR ranges | **✅ implemented** |
 | 4 | active TLS / headers / tech / screenshots / WAF / nuclei | planned |
 | 5 | consolidated JSON + MD/HTML report + run deltas | planned |
 

@@ -73,17 +73,21 @@ def run_phase(
 
     for m in toposort(modules):
         ready = m.preflight(ctx)
+
+        # Dry-run previews the full plan — even for modules that aren't ready on
+        # this box (e.g. masscan/nmap that run in Docker) — annotated with why.
+        if dry_run:
+            actions = list(m.plan(ctx))
+            emit({"kind": "plan", "module": m.name, "actions": actions,
+                  "ready": ready.ready, "reason": ready.skipped_reason})
+            results.append(ModuleResult(m.name, "planned", records=len(actions), actions=actions))
+            continue
+
         if not ready.ready:
             ctx.audit.record(module=m.name, action="preflight", outcome="skipped",
                              detail=ready.skipped_reason)
             emit({"kind": "skip", "module": m.name, "reason": ready.skipped_reason})
             results.append(ModuleResult(m.name, "skipped", reason=ready.skipped_reason))
-            continue
-
-        if dry_run:
-            actions = list(m.plan(ctx))
-            emit({"kind": "plan", "module": m.name, "actions": actions})
-            results.append(ModuleResult(m.name, "planned", records=len(actions), actions=actions))
             continue
 
         if resume and ctx.store.is_done(m.name, ih):

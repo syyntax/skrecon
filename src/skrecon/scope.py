@@ -77,6 +77,15 @@ class ResolvedScope:
         # ip_network.__contains__ returns False on version mismatch — safe.
         return any(addr in net for net in self.networks)
 
+    def contains_network(self, net: Network) -> bool:
+        """True only if `net` is fully contained within an in-scope network.
+
+        A range broader than any authorized network is NOT in scope — so an
+        active scanner can never be pointed at a wider range than the client
+        authorized, even if it overlaps one.
+        """
+        return any(net.version == sn.version and net.subnet_of(sn) for sn in self.networks)
+
     def is_empty(self) -> bool:
         return not self.hostnames and not self.networks
 

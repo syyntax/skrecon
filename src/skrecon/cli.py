@@ -347,6 +347,7 @@ def run(
         settings=settings, engagement=meta, scope=scope, guard=guard, gate=gate,
         executor=executor, http=http, store=store, audit=audit,
         resolver=resolver, http_passive=http_passive, cache=cache, vault=vault,
+        raw_dir=ws.raw_dir,
     )
 
     phases = {
@@ -410,9 +411,14 @@ def _pipeline_event(event: dict) -> None:
         console.print(f"  [yellow]skip[/yellow] {name}: {escape(str(event.get('reason')))}")
     elif kind == "plan":
         actions = event.get("actions", [])
-        console.print(f"  [cyan]plan[/cyan] {name}: {len(actions)} action(s)")
+        tag = ""
+        if not event.get("ready", True):
+            tag = f"  [yellow](would skip: {escape(str(event.get('reason')))})[/yellow]"
+        console.print(f"  [cyan]plan[/cyan] {name}: {len(actions)} action(s){tag}")
         for a in actions:
             console.print(f"      - {escape(a.description)}")
+            if a.command:
+                console.print(f"        [dim]{escape(a.command)}[/dim]")
     elif kind == "run":
         console.print(f"  [green]run[/green]  {name} ...")
     elif kind == "done":
