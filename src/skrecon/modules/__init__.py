@@ -34,3 +34,11 @@ from . import harvester       # noqa: F401,E402  registers "harvester"
 # Phase 3 — active discovery
 from . import masscan_scan    # noqa: F401,E402  registers "masscan"
 from . import nmap_scan       # noqa: F401,E402  registers "nmap"
+
+# Phase 4 — active web analysis
+from . import tls_scan        # noqa: F401,E402  registers "tls"
+from . import http_headers    # noqa: F401,E402  registers "headers"
+from . import tech            # noqa: F401,E402  registers "tech"
+from . import screenshots     # noqa: F401,E402  registers "screenshots"
+from . import waf             # noqa: F401,E402  registers "waf"
+from . import nuclei_scan     # noqa: F401,E402  registers "nuclei"

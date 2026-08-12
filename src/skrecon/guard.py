@@ -12,7 +12,11 @@ from __future__ import annotations
 
 import ipaddress
 import re
+import socket
+import ssl
 import subprocess
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Callable, Optional
@@ -223,16 +227,50 @@ class GuardedExecutor:
         )
 
 
+_WEB_UA = "skrecon/0.1 (+authorized-recon)"
+_MAX_BODY = 512 * 1024   # cap response body reads
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Never auto-follow redirects — a redirect could bounce us to an out-of-scope
+    host, and for header/TLS analysis we want the actual response anyway."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D401
+        return None
+
+
+@dataclass
+class HttpResult:
+    url: str
+    status: Optional[int] = None
+    headers: dict[str, str] = field(default_factory=dict)
+    set_cookies: list[str] = field(default_factory=list)   # kept separate (dict collapses dups)
+    body: str = ""
+    planned: bool = False
+    error: Optional[str] = None
+
+
+@dataclass
+class TlsResult:
+    host: str
+    port: int
+    protocols: list[str] = field(default_factory=list)   # supported versions
+    cert: Optional[dict] = None
+    planned: bool = False
+    error: Optional[str] = None
+
+
 @dataclass
 class GuardedHttp:
-    """Guarded entry point for target-directed HTTP (active web modules, Phase 4).
+    """Guarded entry point for target-directed HTTP/TLS (active web modules).
 
-    `check_url` is the scope gate for a URL; the actual fetch implementation lands
-    with the Phase-4 web modules. Passive third-party API calls do NOT go through
-    here — they use an unguarded client since they never touch client targets.
+    Every request is scope-validated and (for real runs) passes the active gate
+    before any connection. Redirects are never auto-followed. Passive third-party
+    API calls do NOT go through here — they use the unguarded client since they
+    never touch client targets.
     """
     guard: ScopeGuard
     audit: AuditLog
+    gate: Optional[ActiveGate] = None
     dry_run: bool = False
 
     def check_url(
@@ -244,3 +282,132 @@ class GuardedHttp:
         resolved_ips: Optional[list[str]] = None,
     ) -> str:
         return self.guard.check_target(url, module=module, phase=phase, resolved_ips=resolved_ips)
+
+    def get(
+        self,
+        url: str,
+        *,
+        module: str,
+        resolved_ips: Optional[list[str]] = None,
+        timeout: float = 15.0,
+    ) -> HttpResult:
+        """Scope-checked, gated, non-redirect-following GET."""
+        self.guard.check_target(url, module=module, phase=Phase.ACTIVE, resolved_ips=resolved_ips)
+        if self.dry_run:
+            self.audit.record(module=module, action="http-get", outcome="planned",
+                              phase=Phase.ACTIVE, target=url)
+            return HttpResult(url=url, planned=True)
+        if self.gate is not None:
+            self.gate.ensure_active_allowed()
+
+        opener = urllib.request.build_opener(_NoRedirect)
+        req = urllib.request.Request(url, headers={"User-Agent": _WEB_UA}, method="GET")
+        result = HttpResult(url=url)
+        try:
+            with opener.open(req, timeout=timeout) as resp:
+                result.status = resp.status
+                result.headers = {k: v for k, v in resp.headers.items()}
+                result.set_cookies = resp.headers.get_all("Set-Cookie") or []
+                result.body = resp.read(_MAX_BODY).decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as exc:
+            # A 3xx/4xx still carries headers worth analyzing.
+            result.status = exc.code
+            result.headers = {k: v for k, v in (exc.headers or {}).items()}
+            result.set_cookies = (exc.headers.get_all("Set-Cookie") if exc.headers else []) or []
+            result.error = f"http:{exc.code}"
+        except Exception as exc:  # noqa: BLE001 — network errors must not crash a run
+            result.error = f"error:{type(exc).__name__}"
+        self.audit.record(module=module, action="http-get",
+                          outcome=str(result.status or result.error),
+                          phase=Phase.ACTIVE, target=url)
+        return result
+
+    def probe_tls(
+        self,
+        host: str,
+        port: int,
+        *,
+        module: str,
+        resolved_ips: Optional[list[str]] = None,
+        timeout: float = 10.0,
+    ) -> TlsResult:
+        """Scope-checked, gated TLS probe: which protocol versions are accepted and
+        the presented certificate (parsed with cryptography when available)."""
+        self.guard.check_target(host, module=module, phase=Phase.ACTIVE, resolved_ips=resolved_ips)
+        if self.dry_run:
+            self.audit.record(module=module, action="tls-probe", outcome="planned",
+                              phase=Phase.ACTIVE, target=f"{host}:{port}")
+            return TlsResult(host=host, port=port, planned=True)
+        if self.gate is not None:
+            self.gate.ensure_active_allowed()
+
+        result = TlsResult(host=host, port=port)
+        versions = [
+            ("TLSv1", ssl.TLSVersion.TLSv1),
+            ("TLSv1.1", ssl.TLSVersion.TLSv1_1),
+            ("TLSv1.2", ssl.TLSVersion.TLSv1_2),
+            ("TLSv1.3", ssl.TLSVersion.TLSv1_3),
+        ]
+        for name, ver in versions:
+            if self._tls_accepts(host, port, ver, timeout):
+                result.protocols.append(name)
+        result.cert = self._peer_cert(host, port, timeout)
+        self.audit.record(module=module, action="tls-probe", outcome="ok",
+                          phase=Phase.ACTIVE, target=f"{host}:{port}",
+                          detail=f"protocols={','.join(result.protocols)}")
+        return result
+
+    @staticmethod
+    def _tls_accepts(host: str, port: int, version, timeout: float) -> bool:
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        try:
+            ctx.minimum_version = version
+            ctx.maximum_version = version
+        except ValueError:
+            return False   # this Python/OpenSSL can't negotiate that version
+        try:
+            with socket.create_connection((host, port), timeout) as sock:
+                with ctx.wrap_socket(sock, server_hostname=host):
+                    return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    @staticmethod
+    def _peer_cert(host: str, port: int, timeout: float) -> Optional[dict]:
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        try:
+            with socket.create_connection((host, port), timeout) as sock:
+                with ctx.wrap_socket(sock, server_hostname=host) as ss:
+                    der = ss.getpeercert(binary_form=True)
+        except Exception:  # noqa: BLE001
+            return None
+        if not der:
+            return None
+        try:
+            from cryptography import x509
+        except Exception:  # noqa: BLE001 — cert parsing is optional
+            return None
+        try:
+            cert = x509.load_der_x509_certificate(der)
+            sans: list[str] = []
+            try:
+                ext = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName)
+                sans = [n.value for n in ext.value]
+            except Exception:  # noqa: BLE001
+                pass
+            not_after = getattr(cert, "not_valid_after_utc", None) or cert.not_valid_after
+            issuer = cert.issuer.rfc4514_string()
+            subject = cert.subject.rfc4514_string()
+            return {
+                "not_after": not_after.isoformat(),
+                "issuer": issuer,
+                "subject": subject,
+                "self_signed": issuer == subject,
+                "sans": sans,
+            }
+        except Exception:  # noqa: BLE001
+            return None

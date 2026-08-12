@@ -80,6 +80,48 @@ CATALOG: dict[str, FindingSpec] = dict(
         _spec("exposure.plaintext", "Plaintext credentials exposed for {client}", Severity.CRITICAL,
               "Rotate all affected credentials immediately, assume compromise, and enforce MFA."),
 
+        # --- TLS/SSL posture (active) ---
+        _spec("tls.protocol.legacy", "Legacy TLS/SSL protocol accepted on {url}", Severity.MEDIUM,
+              "Disable SSLv3/TLS 1.0/1.1; require TLS 1.2+ (ideally TLS 1.3)."),
+        _spec("tls.cert.expired", "TLS certificate expired on {url}", Severity.HIGH,
+              "Replace the expired certificate immediately."),
+        _spec("tls.cert.expiring", "TLS certificate expiring soon on {url}", Severity.MEDIUM,
+              "Renew the certificate and automate renewal to avoid outages."),
+        _spec("tls.cert.self_signed", "Self-signed TLS certificate on {url}", Severity.LOW,
+              "Use a certificate from a trusted CA for public-facing services."),
+
+        # --- HTTP security headers (active) ---
+        _spec("http.header.hsts.missing", "Missing HSTS header on {url}", Severity.MEDIUM,
+              "Add Strict-Transport-Security with a long max-age and includeSubDomains."),
+        _spec("http.header.csp.missing", "Missing Content-Security-Policy on {url}", Severity.MEDIUM,
+              "Define a Content-Security-Policy to mitigate XSS and injection."),
+        _spec("http.header.xfo.missing", "Missing X-Frame-Options on {url}", Severity.LOW,
+              "Set X-Frame-Options: DENY/SAMEORIGIN (or CSP frame-ancestors) against clickjacking."),
+        _spec("http.header.xcto.missing", "Missing/weak X-Content-Type-Options on {url}", Severity.LOW,
+              "Set X-Content-Type-Options: nosniff."),
+        _spec("http.header.referrer.missing", "Missing Referrer-Policy on {url}", Severity.INFO,
+              "Set a Referrer-Policy such as strict-origin-when-cross-origin."),
+        _spec("http.header.permissions.missing", "Missing Permissions-Policy on {url}", Severity.INFO,
+              "Set a Permissions-Policy to restrict powerful browser features."),
+        _spec("http.cookie.insecure", "Insecure cookie flags on {url}", Severity.LOW,
+              "Set Secure, HttpOnly, and SameSite on session cookies."),
+
+        # --- WAF (active) ---
+        _spec("waf.detected", "WAF detected on {url}: {firewall}", Severity.INFO,
+              "Informational: interpret later findings knowing a WAF is present."),
+
+        # --- Templated vulnerabilities (nuclei — opt-in) ---
+        _spec("nuclei.info", "{name} on {url}", Severity.INFO,
+              "Review the nuclei match; validate before reporting."),
+        _spec("nuclei.low", "{name} on {url}", Severity.LOW,
+              "Validate the nuclei match against the live service and remediate."),
+        _spec("nuclei.medium", "{name} on {url}", Severity.MEDIUM,
+              "Validate the nuclei match against the live service and remediate."),
+        _spec("nuclei.high", "{name} on {url}", Severity.HIGH,
+              "Validate and remediate promptly; confirm exploitability."),
+        _spec("nuclei.critical", "{name} on {url}", Severity.CRITICAL,
+              "Validate and remediate urgently; confirm exploitability."),
+
         # --- Typosquatting / brand abuse ---
         _spec("typosquat.registered", "Look-alike domain registered: {candidate}", Severity.LOW,
               "Monitor or defensively register; watch for phishing/abuse."),

@@ -327,7 +327,7 @@ def run(
     guard = ScopeGuard(scope=scope, audit=audit, include_subdomains=settings.include_subdomains)
     gate = ActiveGate(authorized=i_am_authorized, audit=audit, engagement=meta)
     executor = GuardedExecutor(guard=guard, gate=gate, audit=audit, dry_run=dry_run)
-    http = GuardedHttp(guard=guard, audit=audit, dry_run=dry_run)
+    http = GuardedHttp(guard=guard, audit=audit, gate=gate, dry_run=dry_run)
     cache = Cache(ws.cache_dir, ttl_seconds=settings.cache_ttl_hours * 3600)
     resolver = PassiveResolver(audit=audit, cache=cache, timeout=settings.dns_timeout,
                                nameservers=settings.dns_nameservers)
