@@ -413,6 +413,22 @@ class EngagementStore:
             rows = self.conn.execute("SELECT * FROM service ORDER BY host_ip, port").fetchall()
         return [dict(r) for r in rows]
 
+    def list_observations(self, kind: Optional[str] = None) -> list[dict[str, Any]]:
+        if kind:
+            rows = self.conn.execute(
+                "SELECT * FROM observation WHERE kind=? ORDER BY id", (kind,)).fetchall()
+        else:
+            rows = self.conn.execute("SELECT * FROM observation ORDER BY id").fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d["data"] = json.loads(d["data"] or "{}")
+            except json.JSONDecodeError:
+                d["data"] = {}
+            out.append(d)
+        return out
+
     def list_domains(self) -> list[dict[str, Any]]:
         return [dict(r) for r in self.conn.execute("SELECT * FROM domain ORDER BY fqdn").fetchall()]
 

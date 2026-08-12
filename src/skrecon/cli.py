@@ -30,8 +30,10 @@ from . import __version__
 from .audit import AuditLog
 from .cache import Cache
 from .config import IMPLEMENTED_PROVIDERS, KNOWN_API_KEYS, Settings
+from .diff import diff_engagements, render_diff_text
 from .engagement import EngagementMeta
 from .errors import BlackoutError, NotAuthorizedError, SkreconError
+from .report import write_reports
 from .guard import ActiveGate, GuardedExecutor, GuardedHttp, ScopeGuard
 from .model import Asset, AssetKind, Phase
 from .modules.base import REGISTRY, Context
@@ -68,6 +70,12 @@ class PhaseChoice(str, Enum):
     passive = "passive"
     active = "active"
     all = "all"
+
+
+class ReportFormat(str, Enum):
+    md = "md"
+    html = "html"
+    both = "both"
 
 
 def _default_config() -> Optional[Path]:
@@ -395,11 +403,14 @@ def run(
     finally:
         if not dry_run:
             _print_findings_summary(store)
+            write_reports(store, ws.exports_dir, fmt="both")
         store.export_json(ws.exports_dir / "engagement.json")
         store.close()
 
     console.print(f"\naudit log: {ws.audit_path}")
     console.print(f"export:    {ws.exports_dir / 'engagement.json'}")
+    if not dry_run:
+        console.print(f"report:    {ws.exports_dir / 'report.html'}  (+ report.md)")
     if exit_code:
         raise typer.Exit(code=exit_code)
 
@@ -527,6 +538,42 @@ def engagement_close(
         console.print(f"[green]engagement closed[/green]. {_vault_line(vault, meta)}")
         console.print("  vault auto-purges on the next run after that date, or use "
                       "[bold]--purge-now[/bold] to purge immediately.")
+
+
+@app.command()
+def report(
+    engagement_id: str = typer.Option(..., "--engagement", "-e", help="Engagement id."),
+    fmt: ReportFormat = typer.Option(ReportFormat.both, "--format", help="md | html | both."),
+    output_dir: Optional[Path] = typer.Option(None, "--output-dir"),
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+) -> None:
+    """Render the Markdown/HTML report from an engagement's stored results."""
+    _settings, ws, _meta = _open_engagement(engagement_id, output_dir, config)
+    with EngagementStore(ws.db_path) as store:
+        written = write_reports(store, ws.exports_dir, fmt=fmt.value)
+    for p in written:
+        console.print(f"[green]wrote[/green] {p}")
+
+
+@app.command()
+def diff(
+    old: str = typer.Option(..., "--old", help="Baseline engagement id."),
+    new: str = typer.Option(..., "--new", help="Retest engagement id."),
+    output_dir: Optional[Path] = typer.Option(None, "--output-dir"),
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+) -> None:
+    """Compare two engagements over the same scope (retest deltas)."""
+    settings = _load_settings(config, {"output_dir": output_dir} if output_dir else {})
+    ws_old = open_workspace(settings.output_dir, old)
+    ws_new = open_workspace(settings.output_dir, new)
+    for ws_, name in ((ws_old, old), (ws_new, new)):
+        if not ws_.exists():
+            console.print(f"[red]no such engagement:[/red] {name}")
+            raise typer.Exit(code=1)
+    with EngagementStore(ws_old.db_path) as o, EngagementStore(ws_new.db_path) as n:
+        delta = diff_engagements(o, n)
+    console.print(f"[bold]diff {old} -> {new}[/bold]")
+    console.print(render_diff_text(delta))
 
 
 def main() -> None:

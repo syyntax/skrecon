@@ -25,7 +25,9 @@ Built in phases (spec §12). Current state:
 | **2** | passive CT subdomains (crt.sh + certspotter fallback) / subdomain aggregation & resolution / Shodan / theHarvester / DeHashed, plus the **encrypted PII vault** (Fernet) and `engagement close`/`status` with retention auto-purge | **✅ implemented** |
 | **3** | active masscan → nmap (`-sV -O -oA`) → normalized services, behind the authorization gate; scope guard extended to validate in-scope CIDR ranges | **✅ implemented** |
 | **4** | active TLS/SSL (protocols + cert + SAN harvest) / HTTP security headers / tech fingerprint (WhatWeb) / screenshots (gowitness) / WAF (wafw00f) / nuclei (opt-in, off by default); guarded, redirect-safe HTTP + TLS prober | **✅ implemented** |
-| 5 | consolidated JSON + MD/HTML report + run deltas | planned |
+| **5** | consolidated JSON + **Markdown & HTML report** (PTES-mapped, from one model) + `diff` run deltas; Docker image bundling the external tools | **✅ implemented** |
+
+**All phases complete.** The full passive→active recon pipeline, safety guardrails, encrypted PII vault, reporting, and a reproducible container are in place.
 
 ## Install (development)
 
@@ -72,6 +74,26 @@ skrecon init --client "Example Corp" --auth-ref TICKET-123 \
 
 # 4. Plan the whole run without touching anything.
 skrecon run --engagement <id> --dry-run
+
+# 5. Passive recon (no packets to targets), then the active phase (gated).
+skrecon run --engagement <id> --phase passive
+skrecon run --engagement <id> --phase active --i-am-authorized
+
+# 6. Render the client report (Markdown + HTML) and manage PII retention.
+skrecon report --engagement <id> --format both
+skrecon engagement status --engagement <id>
+skrecon engagement close --engagement <id>
+
+# 7. Retest delta vs. a prior engagement over the same scope.
+skrecon diff --old <baseline-id> --new <retest-id>
+```
+
+### Docker (bundles nmap, masscan, subfinder, nuclei, gowitness, whatweb, wafw00f, theHarvester)
+
+```bash
+docker build -t stormkeep/skrecon .
+docker run --rm -v "$PWD/engagements:/engagements" --env-file .env \
+    --cap-add=NET_RAW stormkeep/skrecon run -e <id> --phase active --i-am-authorized
 ```
 
 ## Safety model (Phase 0)
