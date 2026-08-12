@@ -21,6 +21,7 @@ from ..model import Phase
 from ..net import PassiveHttp, PassiveResolver
 from ..scope import ResolvedScope
 from ..store import EngagementStore
+from ..vault import EncryptedVault
 
 
 @dataclass
@@ -66,6 +67,7 @@ class Context:
     resolver: PassiveResolver
     http_passive: PassiveHttp
     cache: Cache
+    vault: EncryptedVault
     scratch: dict[str, Any] = field(default_factory=dict)
 
 

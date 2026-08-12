@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from skrecon.engagement import EngagementMeta
 from skrecon.findings import make_finding
-from skrecon.model import Asset, AssetKind, Checkpoint, DnsRecord, HostIP
+from skrecon.model import (
+    Asset, AssetKind, Certificate, CertSource, Checkpoint, DnsRecord,
+    Exposure, ExposureFormat, HostIP,
+)
 from skrecon.store import EngagementStore
 from skrecon.workspace import Workspace, make_engagement_id
 
@@ -64,3 +69,21 @@ def test_persist_dedups_and_upserts(tmp_path):
         store.persist(DnsRecord(domain="example.com", rtype="A", value="203.0.113.5"))
         store.persist(DnsRecord(domain="example.com", rtype="A", value="203.0.113.5"))
         assert store.counts()["dns_record"] == 1
+
+
+def test_persist_certificates_and_exposures(tmp_path):
+    not_after = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    with EngagementStore(tmp_path / "s.db") as store:
+        store.persist(Certificate(subject="www.example.com", issuer="LE",
+                                  sans=["www.example.com"], not_after=not_after, source=CertSource.CT))
+        store.persist(Certificate(subject="www.example.com", issuer="LE",
+                                  sans=["www.example.com"], not_after=not_after, source=CertSource.CT))
+        assert store.counts()["certificate"] == 1        # deduped
+
+        # Exposure carries counts only; re-run upserts the count, never duplicates.
+        store.persist(Exposure(client_id="example.com", breach_source="BreachA",
+                               record_count=5, fmt=ExposureFormat.PLAINTEXT, vault_ref="vault:breach"))
+        store.persist(Exposure(client_id="example.com", breach_source="BreachA",
+                               record_count=9, fmt=ExposureFormat.PLAINTEXT, vault_ref="vault:breach"))
+        exposures = store.list_exposures()
+        assert len(exposures) == 1 and exposures[0]["record_count"] == 9

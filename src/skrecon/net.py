@@ -132,15 +132,25 @@ class PassiveHttp:
         accept: str = "application/json",
         module: str = "http",
         cache_key: Optional[str] = None,
+        headers: Optional[dict[str, str]] = None,
+        no_cache: bool = False,
     ) -> tuple[int, Optional[Any]]:
         """GET a URL and parse JSON. Returns (status, data|None). Never raises for
-        network/HTTP errors — returns a status and None so callers degrade."""
-        key = cache_key or f"http:{url}"
-        cached = self.cache.get(key)
-        if cached is not None:
-            return 200, cached
+        network/HTTP errors — returns a status and None so callers degrade.
 
-        req = urllib.request.Request(url, headers={"User-Agent": self.user_agent, "Accept": accept})
+        `no_cache` bypasses the disk cache entirely — mandatory for PII responses
+        (e.g. DeHashed), which must never be written to the plaintext cache.
+        """
+        key = cache_key or f"http:{url}"
+        if not no_cache:
+            cached = self.cache.get(key)
+            if cached is not None:
+                return 200, cached
+
+        req_headers = {"User-Agent": self.user_agent, "Accept": accept}
+        if headers:
+            req_headers.update(headers)
+        req = urllib.request.Request(url, headers=req_headers)
         status = 0
         data: Optional[Any] = None
         outcome = "ok"
@@ -156,6 +166,6 @@ class PassiveHttp:
             outcome = f"error:{type(exc).__name__}"
         self.audit.record(module=module, action="http-get", outcome=outcome,
                           target=url, detail=f"status={status}")
-        if data is not None:
+        if data is not None and not no_cache:
             self.cache.set(key, data)
         return status, data

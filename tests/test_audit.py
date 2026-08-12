@@ -27,3 +27,12 @@ def test_record_redacts_before_write(tmp_path):
     text = path.read_text(encoding="utf-8")
     assert "KEY123" not in text
     assert "shodan" in text
+
+
+def test_record_redacts_api_key_in_target_url(tmp_path):
+    # Shodan/DeHashed put the key in the request URL, which lands in `target`.
+    path = tmp_path / "audit.jsonl"
+    a = AuditLog(path=path, secrets=("SHODANKEY",))
+    a.record(module="shodan", action="http-get", outcome="ok",
+             target="https://api.shodan.io/shodan/host/1.2.3.4?key=SHODANKEY")
+    assert "SHODANKEY" not in path.read_text(encoding="utf-8")

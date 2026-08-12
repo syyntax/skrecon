@@ -18,9 +18,11 @@ from typing import Any, Optional
 from .engagement import EngagementMeta
 from .model import (
     Asset,
+    Certificate,
     Checkpoint,
     DnsRecord,
     DomainName,
+    Exposure,
     Finding,
     HostIP,
     Observation,
@@ -100,7 +102,8 @@ CREATE TABLE IF NOT EXISTS exposure (
     breach_source TEXT NOT NULL,
     record_count  INTEGER NOT NULL DEFAULT 0,
     fmt           TEXT NOT NULL DEFAULT 'unknown',
-    vault_ref     TEXT
+    vault_ref     TEXT,
+    UNIQUE(client_id, breach_source)
 );
 
 CREATE TABLE IF NOT EXISTS checkpoint (
@@ -145,6 +148,18 @@ CREATE TABLE IF NOT EXISTS observation (
     subject  TEXT NOT NULL,
     kind     TEXT NOT NULL,
     data     TEXT
+);
+
+CREATE TABLE IF NOT EXISTS certificate (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    subject      TEXT,
+    issuer       TEXT,
+    sans         TEXT,             -- json array (another subdomain source)
+    not_before   TEXT,
+    not_after    TEXT,
+    self_signed  INTEGER NOT NULL DEFAULT 0,
+    source       TEXT NOT NULL,
+    UNIQUE(subject, issuer, not_after, source)
 );
 """
 
@@ -274,6 +289,10 @@ class EngagementStore:
             self.add_observation(record)
         elif isinstance(record, Service):
             self.add_service(record)
+        elif isinstance(record, Certificate):
+            self.add_certificate(record)
+        elif isinstance(record, Exposure):
+            self.add_exposure(record)
         else:
             raise TypeError(f"cannot persist record of type {type(record).__name__}")
 
@@ -344,6 +363,30 @@ class EngagementStore:
         )
         self.conn.commit()
 
+    def add_certificate(self, c: Certificate) -> None:
+        self.conn.execute(
+            """INSERT OR IGNORE INTO certificate
+               (subject, issuer, sans, not_before, not_after, self_signed, source)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (c.subject, c.issuer, json.dumps(c.sans),
+             c.not_before.isoformat() if c.not_before else None,
+             c.not_after.isoformat() if c.not_after else None,
+             int(c.self_signed), c.source.value),
+        )
+        self.conn.commit()
+
+    def add_exposure(self, e: Exposure) -> None:
+        # One row per (client, source); a re-run replaces the count.
+        self.conn.execute(
+            """INSERT INTO exposure (client_id, breach_source, record_count, fmt, vault_ref)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(client_id, breach_source) DO UPDATE SET
+                   record_count=excluded.record_count, fmt=excluded.fmt,
+                   vault_ref=excluded.vault_ref""",
+            (e.client_id, e.breach_source, e.record_count, e.fmt.value, e.vault_ref),
+        )
+        self.conn.commit()
+
     # -- queries ---------------------------------------------------------- #
     def list_findings(self) -> list[dict[str, Any]]:
         rows = self.conn.execute(
@@ -365,9 +408,22 @@ class EngagementStore:
     def list_domains(self) -> list[dict[str, Any]]:
         return [dict(r) for r in self.conn.execute("SELECT * FROM domain ORDER BY fqdn").fetchall()]
 
+    def list_certificates(self) -> list[dict[str, Any]]:
+        rows = self.conn.execute("SELECT * FROM certificate ORDER BY not_after DESC").fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["sans"] = json.loads(d["sans"] or "[]")
+            out.append(d)
+        return out
+
+    def list_exposures(self) -> list[dict[str, Any]]:
+        return [dict(r) for r in
+                self.conn.execute("SELECT * FROM exposure ORDER BY record_count DESC").fetchall()]
+
     def counts(self) -> dict[str, int]:
-        tables = ("asset", "domain", "host_ip", "service", "finding",
-                  "dns_record", "observation", "audit_event")
+        tables = ("asset", "domain", "host_ip", "service", "finding", "certificate",
+                  "exposure", "dns_record", "observation", "audit_event")
         return {
             t: int(self.conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0])
             for t in tables
@@ -381,6 +437,8 @@ class EngagementStore:
             "assets": self.list_assets(),
             "domains": self.list_domains(),
             "hosts": self.list_hosts(),
+            "certificates": self.list_certificates(),
+            "exposures": self.list_exposures(),   # counts only — no plaintext PII
             "findings": self.list_findings(),
             "checkpoints": [dict(r) for r in
                             self.conn.execute("SELECT * FROM checkpoint").fetchall()],

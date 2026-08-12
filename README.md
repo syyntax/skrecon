@@ -22,7 +22,7 @@ Built in phases (spec §12). Current state:
 |-------|----------|--------|
 | **0** | config/secrets, scope parser+normalizer, engagement metadata, **scope guard**, authorization gate, blackout windows, audit log, data model, dry-run, preflight | **✅ implemented** |
 | **1** | passive DNS / reverse-DNS / WHOIS-RDAP (+expiry) / mail-posture (SPF/DMARC/DKIM/MTA-STS/TLS-RPT/BIMI) / typosquat, plus the passive pipeline, resolver, HTTP client, cache & findings catalog | **✅ implemented** |
-| 2 | passive CT / subdomains / Shodan / harvester / DeHashed | planned |
+| **2** | passive CT subdomains (crt.sh + certspotter fallback) / subdomain aggregation & resolution / Shodan / theHarvester / DeHashed, plus the **encrypted PII vault** (Fernet) and `engagement close`/`status` with retention auto-purge | **✅ implemented** |
 | 3 | active masscan → nmap → services | planned |
 | 4 | active TLS / headers / tech / screenshots / WAF / nuclei | planned |
 | 5 | consolidated JSON + MD/HTML report + run deltas | planned |
@@ -47,6 +47,14 @@ dnstwist for typosquatting). Modules whose bindings are absent are reported as
 
 ```bash
 python -m pip install -e ".[passive]"
+```
+
+The DeHashed/harvester modules store breach & persona PII in an encrypted vault,
+which needs `cryptography` and a passphrase (`SKRECON_VAULT_PASSPHRASE`). Without
+them those modules skip rather than write PII unencrypted:
+
+```bash
+python -m pip install -e ".[vault]"
 ```
 
 ## Quickstart

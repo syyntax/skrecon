@@ -14,7 +14,9 @@ scope guard and authorization gate are exercised from day one.
 from __future__ import annotations
 
 import json
+import os
 import shutil
+from datetime import timedelta
 from enum import Enum
 from pathlib import Path
 from typing import Optional
@@ -37,6 +39,7 @@ from .net import PassiveHttp, PassiveResolver
 from .pipeline import run_phase
 from .scope import ScopeParseResult, parse_scope_file, parse_scope_text
 from .store import EngagementStore
+from .vault import EncryptedVault
 from .workspace import make_engagement_id, open_workspace
 
 app = typer.Typer(
@@ -329,10 +332,21 @@ def run(
     resolver = PassiveResolver(audit=audit, cache=cache, timeout=settings.dns_timeout,
                                nameservers=settings.dns_nameservers)
     http_passive = PassiveHttp(audit=audit, cache=cache, timeout=settings.http_timeout)
+    vault = EncryptedVault(ws.vault_dir, os.environ.get("SKRECON_VAULT_PASSPHRASE"))
+
+    # Auto-purge PII once the retention window has elapsed (spec §9.6).
+    if vault.is_expired(meta.retention_days):
+        removed = vault.purge()
+        if removed:
+            audit.record(module="core", action="retention-purge", outcome="purged",
+                         detail=f"retention {meta.retention_days}d elapsed; removed {len(removed)} file(s)")
+            console.print(f"  [yellow]retention window elapsed — purged encrypted vault "
+                          f"({len(removed)} file(s)).[/yellow]")
+
     ctx = Context(
         settings=settings, engagement=meta, scope=scope, guard=guard, gate=gate,
         executor=executor, http=http, store=store, audit=audit,
-        resolver=resolver, http_passive=http_passive, cache=cache,
+        resolver=resolver, http_passive=http_passive, cache=cache, vault=vault,
     )
 
     phases = {
@@ -436,6 +450,77 @@ def _safe_mirror(store: EngagementStore, line: str) -> None:
         store.add_audit_event(json.loads(line))
     except Exception:  # noqa: BLE001 — mirroring must never break a run
         pass
+
+
+engagement_app = typer.Typer(help="Engagement lifecycle (status / close).")
+app.add_typer(engagement_app, name="engagement")
+
+
+def _open_engagement(engagement_id: str, output_dir: Optional[Path], config: Optional[Path]):
+    overrides = {"output_dir": output_dir} if output_dir else {}
+    settings = _load_settings(config, overrides)
+    ws = open_workspace(settings.output_dir, engagement_id)
+    if not ws.exists():
+        console.print(f"[red]no such engagement:[/red] {ws.root}")
+        raise typer.Exit(code=1)
+    return settings, ws, ws.read_meta()
+
+
+def _vault_line(vault: EncryptedVault, meta) -> str:
+    created = vault.created_at()
+    if not vault.has_data():
+        return "encrypted vault: [dim]empty[/dim]"
+    due = (created + timedelta(days=meta.retention_days)).date().isoformat() if created else "n/a"
+    if vault.available():
+        counts = f"breach={vault.count('breach')} persona={vault.count('persona')}"
+    else:
+        counts = "[yellow]locked[/yellow] (set SKRECON_VAULT_PASSPHRASE to view)"
+    return f"encrypted vault: {counts}; retained until {due} (retention {meta.retention_days}d)"
+
+
+@engagement_app.command("status")
+def engagement_status(
+    engagement_id: str = typer.Option(..., "--engagement", "-e", help="Engagement id."),
+    output_dir: Optional[Path] = typer.Option(None, "--output-dir"),
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+) -> None:
+    """Show engagement metadata, counts, and vault/retention status."""
+    _settings, ws, meta = _open_engagement(engagement_id, output_dir, config)
+    vault = EncryptedVault(ws.vault_dir, os.environ.get("SKRECON_VAULT_PASSPHRASE"))
+    console.print(f"[bold]{meta.id}[/bold]  client={meta.client}  auth_ref={meta.auth_ref}  tester={meta.tester}")
+    with EngagementStore(ws.db_path) as store:
+        console.print(f"  counts: {store.counts()}")
+    console.print(f"  {_vault_line(vault, meta)}")
+
+
+@engagement_app.command("close")
+def engagement_close(
+    engagement_id: str = typer.Option(..., "--engagement", "-e", help="Engagement id."),
+    purge_now: bool = typer.Option(False, "--purge-now", help="Purge the encrypted vault immediately."),
+    output_dir: Optional[Path] = typer.Option(None, "--output-dir"),
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+) -> None:
+    """Close the engagement; purge PII now or when its retention window elapses."""
+    settings, ws, meta = _open_engagement(engagement_id, output_dir, config)
+    vault = EncryptedVault(ws.vault_dir, os.environ.get("SKRECON_VAULT_PASSPHRASE"))
+    audit = AuditLog(ws.audit_path, secrets=settings.secret_values())
+
+    expired = vault.is_expired(meta.retention_days)
+    if purge_now or expired:
+        removed = vault.purge()
+        reason = "operator requested" if purge_now else "retention window elapsed"
+        audit.record(module="core", action="engagement-close", outcome="purged",
+                     detail=f"{reason}; removed {len(removed)} vault file(s)")
+        console.print(f"[green]engagement closed[/green]; encrypted vault purged "
+                      f"({len(removed)} file(s); {reason}).")
+    else:
+        created = vault.created_at()
+        due = (created + timedelta(days=meta.retention_days)).date().isoformat() if created else "n/a"
+        audit.record(module="core", action="engagement-close", outcome="closed",
+                     detail=f"vault retained until {due}")
+        console.print(f"[green]engagement closed[/green]. {_vault_line(vault, meta)}")
+        console.print("  vault auto-purges on the next run after that date, or use "
+                      "[bold]--purge-now[/bold] to purge immediately.")
 
 
 def main() -> None:

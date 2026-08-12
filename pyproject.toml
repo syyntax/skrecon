@@ -36,6 +36,11 @@ passive = [
 active = [
     "sslyze>=6.0",
 ]
+# Encrypted PII vault (Phase 2 DeHashed/harvester). UTC-only core still runs
+# without this; PII-handling modules skip when it is absent.
+vault = [
+    "cryptography>=42",
+]
 dev = [
     "pytest>=8.0",
 ]

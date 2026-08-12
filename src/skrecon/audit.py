@@ -66,7 +66,8 @@ class AuditLog:
             "action": action,
             "outcome": outcome,
             "phase": phase.value if isinstance(phase, Phase) else phase,
-            "target": target,
+            # target may be an API URL carrying a key in the query string — redact it too.
+            "target": self.redact(target),
             "command": self.redact(command),
             "detail": self.redact(detail),
         }

@@ -40,6 +40,7 @@ def test_unknown_finding_type_raises():
 
 def test_catalog_titles_have_no_stray_placeholders():
     # Every catalog title must render given the placeholders our modules pass.
-    ctx = {"domain": "d", "date": "2026-01-01", "candidate": "c"}
+    ctx = {"domain": "d", "date": "2026-01-01", "candidate": "c",
+           "cve": "CVE-2024-0001", "ip": "203.0.113.5", "count": 3, "client": "acme"}
     for spec in CATALOG.values():
         spec.title.format(**ctx)  # must not raise KeyError

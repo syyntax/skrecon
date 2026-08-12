@@ -68,6 +68,18 @@ CATALOG: dict[str, FindingSpec] = dict(
         _spec("mail.bimi.missing", "No BIMI record for {domain}", Severity.INFO,
               "Optional: publish BIMI once DMARC is at enforcement to display brand logos."),
 
+        # --- Internet exposure (Shodan — third-party-observed, not tester-confirmed) ---
+        _spec("shodan.vuln", "Shodan reports {cve} on {ip} (third-party-observed)", Severity.MEDIUM,
+              "Confirm the CVE against the live service and patch; validate first — Shodan data may be stale."),
+        _spec("shodan.exposed_service", "Shodan shows {count} exposed service(s) on {ip}", Severity.INFO,
+              "Review whether each exposed service should be internet-facing; restrict as needed."),
+
+        # --- Breach / credential exposure (PII summary; raw data stays in the vault) ---
+        _spec("exposure.credentials", "Credential exposure for {client}: {count} record(s)", Severity.HIGH,
+              "Force resets for affected accounts, enforce MFA, and monitor for credential reuse."),
+        _spec("exposure.plaintext", "Plaintext credentials exposed for {client}", Severity.CRITICAL,
+              "Rotate all affected credentials immediately, assume compromise, and enforce MFA."),
+
         # --- Typosquatting / brand abuse ---
         _spec("typosquat.registered", "Look-alike domain registered: {candidate}", Severity.LOW,
               "Monitor or defensively register; watch for phishing/abuse."),
