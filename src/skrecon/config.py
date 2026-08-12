@@ -72,6 +72,12 @@ class Settings:
     enable_axfr: bool = False
     enable_udp: bool = False
     retention_days: int = 90
+    # passive-recon thresholds / tuning (Phase 1+)
+    expiry_warn_days: int = 60           # WHOIS/RDAP "expiring soon" threshold
+    dns_timeout: float = 5.0
+    dns_nameservers: list[str] = field(default_factory=list)  # empty = system resolvers
+    http_timeout: float = 15.0
+    cache_ttl_hours: int = 168           # 7 days; caches expensive OSINT lookups
     rates: RateConfig = field(default_factory=RateConfig)
     modules: dict[str, bool] = field(default_factory=dict)   # explicit enable/disable
     blackout: list[dict[str, Any]] = field(default_factory=list)
@@ -116,9 +122,14 @@ class Settings:
         for key in ("include_subdomains", "enable_axfr", "enable_udp"):
             if key in data:
                 setattr(self, key, _as_bool(data[key]))
-        for key in ("max_expanded_hosts", "retention_days"):
+        for key in ("max_expanded_hosts", "retention_days", "expiry_warn_days", "cache_ttl_hours"):
             if key in data:
                 setattr(self, key, int(data[key]))
+        for key in ("dns_timeout", "http_timeout"):
+            if key in data:
+                setattr(self, key, float(data[key]))
+        if "dns_nameservers" in data:
+            self.dns_nameservers = [str(x) for x in data["dns_nameservers"]]
         if "rates" in data:
             self.rates = RateConfig.from_dict(data["rates"])
         if "modules" in data:

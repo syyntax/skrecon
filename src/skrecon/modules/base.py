@@ -13,10 +13,12 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional, Protocol, runtime_checkable
 
 from ..audit import AuditLog
+from ..cache import Cache
 from ..config import Settings
 from ..engagement import EngagementMeta
 from ..guard import ActiveGate, GuardedExecutor, GuardedHttp, ScopeGuard
 from ..model import Phase
+from ..net import PassiveHttp, PassiveResolver
 from ..scope import ResolvedScope
 from ..store import EngagementStore
 
@@ -46,8 +48,12 @@ class Action:
 
 @dataclass
 class Context:
-    """Everything a module is given. The guard/gate/executor are the only ways
-    to reach a target; `http_passive` is for third-party OSINT APIs only."""
+    """Everything a module is given.
+
+    Active reach: guard/gate/executor/http are the only routes to a client target.
+    Passive reach: resolver (DNS) and http_passive (third-party OSINT APIs) never
+    touch client targets, so they are unguarded. `cache` persists expensive
+    lookups; `scratch` is per-run in-memory scratch space for inter-module data."""
     settings: Settings
     engagement: EngagementMeta
     scope: ResolvedScope
@@ -57,7 +63,10 @@ class Context:
     http: GuardedHttp
     store: EngagementStore
     audit: AuditLog
-    cache: dict[str, Any] = field(default_factory=dict)
+    resolver: PassiveResolver
+    http_passive: PassiveHttp
+    cache: Cache
+    scratch: dict[str, Any] = field(default_factory=dict)
 
 
 @runtime_checkable

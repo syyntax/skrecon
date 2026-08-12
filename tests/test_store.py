@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from skrecon.engagement import EngagementMeta
-from skrecon.model import Asset, AssetKind, Checkpoint
+from skrecon.findings import make_finding
+from skrecon.model import Asset, AssetKind, Checkpoint, DnsRecord, HostIP
 from skrecon.store import EngagementStore
 from skrecon.workspace import Workspace, make_engagement_id
 
@@ -45,3 +46,21 @@ def test_store_assets_checkpoints_export(tmp_path):
         assert store.get_engagement()["client"] == "C"
         out = store.export_json(ws.exports_dir / "e.json")
         assert out.exists()
+
+
+def test_persist_dedups_and_upserts(tmp_path):
+    with EngagementStore(tmp_path / "s.db") as store:
+        f = make_finding("mail.dmarc.missing", affected=["example.com"], evidence=["x"],
+                         source_module="mail", title_ctx={"domain": "example.com"})
+        store.persist(f)
+        store.persist(f)                                   # identical finding -> deduped
+        assert store.counts()["finding"] == 1
+
+        store.persist(HostIP(ip="203.0.113.5", version=4, in_scope=True))
+        store.persist(HostIP(ip="203.0.113.5", version=4, ptr="host.example.com", in_scope=True))
+        hosts = store.list_hosts()
+        assert len(hosts) == 1 and hosts[0]["ptr"] == "host.example.com"   # upsert merged
+
+        store.persist(DnsRecord(domain="example.com", rtype="A", value="203.0.113.5"))
+        store.persist(DnsRecord(domain="example.com", rtype="A", value="203.0.113.5"))
+        assert store.counts()["dns_record"] == 1

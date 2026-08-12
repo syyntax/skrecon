@@ -16,7 +16,19 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .engagement import EngagementMeta
-from .model import Asset, Checkpoint, to_jsonable, utcnow
+from .model import (
+    Asset,
+    Checkpoint,
+    DnsRecord,
+    DomainName,
+    Finding,
+    HostIP,
+    Observation,
+    ResolutionEdge,
+    Service,
+    to_jsonable,
+    utcnow,
+)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS engagement (
@@ -77,7 +89,8 @@ CREATE TABLE IF NOT EXISTS finding (
     phase          TEXT NOT NULL,
     affected       TEXT,             -- json array
     evidence       TEXT,             -- json array
-    remediation    TEXT
+    remediation    TEXT,
+    dedup          TEXT UNIQUE       -- finding_type + sorted(affected); idempotent re-runs
 );
 
 -- Aggregate exposure metadata only. NO plaintext credentials here.
@@ -109,6 +122,29 @@ CREATE TABLE IF NOT EXISTS audit_event (
     target   TEXT,
     command  TEXT,
     detail   TEXT
+);
+
+CREATE TABLE IF NOT EXISTS dns_record (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    domain  TEXT NOT NULL,
+    rtype   TEXT NOT NULL,
+    value   TEXT NOT NULL,
+    UNIQUE(domain, rtype, value)
+);
+
+CREATE TABLE IF NOT EXISTS resolution_edge (
+    id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    src  TEXT NOT NULL,
+    via  TEXT,
+    dst  TEXT NOT NULL,
+    UNIQUE(src, via, dst)
+);
+
+CREATE TABLE IF NOT EXISTS observation (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    subject  TEXT NOT NULL,
+    kind     TEXT NOT NULL,
+    data     TEXT
 );
 """
 
@@ -221,18 +257,134 @@ class EngagementStore:
     def count_audit_events(self) -> int:
         return int(self.conn.execute("SELECT COUNT(*) FROM audit_event").fetchone()[0])
 
+    # -- normalized records (Phase 1+) ------------------------------------ #
+    def persist(self, record: object) -> None:
+        """Dispatch a yielded model record to the right table."""
+        if isinstance(record, Finding):
+            self.add_finding(record)
+        elif isinstance(record, DomainName):
+            self.upsert_domain(record)
+        elif isinstance(record, HostIP):
+            self.upsert_host(record)
+        elif isinstance(record, DnsRecord):
+            self.add_dns_record(record)
+        elif isinstance(record, ResolutionEdge):
+            self.add_resolution_edge(record)
+        elif isinstance(record, Observation):
+            self.add_observation(record)
+        elif isinstance(record, Service):
+            self.add_service(record)
+        else:
+            raise TypeError(f"cannot persist record of type {type(record).__name__}")
+
+    def add_finding(self, f: Finding) -> int:
+        dedup = f.finding_type + "|" + ",".join(sorted(f.affected))
+        cur = self.conn.execute(
+            """INSERT OR IGNORE INTO finding
+               (finding_type, title, severity, source_module, phase, affected, evidence, remediation, dedup)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (f.finding_type, f.title, f.severity.value, f.source_module, f.phase.value,
+             json.dumps(f.affected), json.dumps(f.evidence), f.remediation, dedup),
+        )
+        self.conn.commit()
+        return cur.rowcount
+
+    def upsert_domain(self, d: DomainName) -> None:
+        self.conn.execute(
+            """INSERT INTO domain (fqdn, registrable_domain, is_scope, resolves)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(fqdn) DO UPDATE SET
+                   registrable_domain=COALESCE(excluded.registrable_domain, domain.registrable_domain),
+                   is_scope=excluded.is_scope,
+                   resolves=COALESCE(excluded.resolves, domain.resolves)""",
+            (d.fqdn, d.registrable_domain, int(d.is_scope),
+             None if d.resolves is None else int(d.resolves)),
+        )
+        self.conn.commit()
+
+    def upsert_host(self, h: HostIP) -> None:
+        self.conn.execute(
+            """INSERT INTO host_ip (ip, version, asn, netblock, ptr, in_scope)
+               VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT(ip) DO UPDATE SET
+                   asn=COALESCE(excluded.asn, host_ip.asn),
+                   netblock=COALESCE(excluded.netblock, host_ip.netblock),
+                   ptr=COALESCE(excluded.ptr, host_ip.ptr),
+                   in_scope=excluded.in_scope""",
+            (h.ip, h.version, h.asn, h.netblock, h.ptr, int(h.in_scope)),
+        )
+        self.conn.commit()
+
+    def add_dns_record(self, r: DnsRecord) -> None:
+        self.conn.execute(
+            "INSERT OR IGNORE INTO dns_record (domain, rtype, value) VALUES (?, ?, ?)",
+            (r.domain, r.rtype, r.value),
+        )
+        self.conn.commit()
+
+    def add_resolution_edge(self, e: ResolutionEdge) -> None:
+        self.conn.execute(
+            "INSERT OR IGNORE INTO resolution_edge (src, via, dst) VALUES (?, ?, ?)",
+            (e.src, e.via, e.dst),
+        )
+        self.conn.commit()
+
+    def add_observation(self, o: Observation) -> None:
+        self.conn.execute(
+            "INSERT INTO observation (subject, kind, data) VALUES (?, ?, ?)",
+            (o.subject, o.kind, json.dumps(to_jsonable(o.data))),
+        )
+        self.conn.commit()
+
+    def add_service(self, s: Service) -> None:
+        self.conn.execute(
+            """INSERT OR IGNORE INTO service (host_ip, port, proto, state, product, version, source)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (s.host_ip, s.port, s.proto, s.state, s.product, s.version, s.source.value),
+        )
+        self.conn.commit()
+
+    # -- queries ---------------------------------------------------------- #
+    def list_findings(self) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT * FROM finding ORDER BY CASE severity "
+            "WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 "
+            "WHEN 'low' THEN 3 ELSE 4 END, finding_type"
+        ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["affected"] = json.loads(d["affected"] or "[]")
+            d["evidence"] = json.loads(d["evidence"] or "[]")
+            out.append(d)
+        return out
+
+    def list_hosts(self) -> list[dict[str, Any]]:
+        return [dict(r) for r in self.conn.execute("SELECT * FROM host_ip ORDER BY ip").fetchall()]
+
+    def list_domains(self) -> list[dict[str, Any]]:
+        return [dict(r) for r in self.conn.execute("SELECT * FROM domain ORDER BY fqdn").fetchall()]
+
+    def counts(self) -> dict[str, int]:
+        tables = ("asset", "domain", "host_ip", "service", "finding",
+                  "dns_record", "observation", "audit_event")
+        return {
+            t: int(self.conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0])
+            for t in tables
+        }
+
     # -- export ----------------------------------------------------------- #
     def export_json(self, path: str | Path) -> Path:
         out = Path(path)
         data = {
             "engagement": self.get_engagement(),
             "assets": self.list_assets(),
+            "domains": self.list_domains(),
+            "hosts": self.list_hosts(),
+            "findings": self.list_findings(),
             "checkpoints": [dict(r) for r in
                             self.conn.execute("SELECT * FROM checkpoint").fetchall()],
-            "counts": {
-                "assets": len(self.list_assets()),
-                "audit_events": self.count_audit_events(),
-            },
+            "counts": self.counts(),
             "exported_at": utcnow().isoformat(),
         }
         out.write_text(json.dumps(to_jsonable(data), indent=2), encoding="utf-8")

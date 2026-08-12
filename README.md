@@ -21,7 +21,7 @@ Built in phases (spec §12). Current state:
 | Phase | Contents | Status |
 |-------|----------|--------|
 | **0** | config/secrets, scope parser+normalizer, engagement metadata, **scope guard**, authorization gate, blackout windows, audit log, data model, dry-run, preflight | **✅ implemented** |
-| 1 | passive DNS / reverse-DNS / WHOIS-RDAP / mail-posture / typosquat | planned |
+| **1** | passive DNS / reverse-DNS / WHOIS-RDAP (+expiry) / mail-posture (SPF/DMARC/DKIM/MTA-STS/TLS-RPT/BIMI) / typosquat, plus the passive pipeline, resolver, HTTP client, cache & findings catalog | **✅ implemented** |
 | 2 | passive CT / subdomains / Shodan / harvester / DeHashed | planned |
 | 3 | active masscan → nmap → services | planned |
 | 4 | active TLS / headers / tech / screenshots / WAF / nuclei | planned |
@@ -39,6 +39,14 @@ To use the CLI (needs `typer`):
 
 ```bash
 python -m pip install -e .
+```
+
+The Phase 1 passive modules need their tool bindings (dnspython for DNS/mail,
+dnstwist for typosquatting). Modules whose bindings are absent are reported as
+`skipped` by `preflight` and skipped at run time rather than failing:
+
+```bash
+python -m pip install -e ".[passive]"
 ```
 
 ## Quickstart

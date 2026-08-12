@@ -68,11 +68,15 @@ class Workspace:
     def vault_dir(self) -> Path:
         return self.root / "vault"
 
+    @property
+    def cache_dir(self) -> Path:
+        return self.root / "cache"
+
     def exists(self) -> bool:
         return self.engagement_json.exists()
 
     def create(self) -> "Workspace":
-        for d in (self.root, self.raw_dir, self.exports_dir, self.vault_dir):
+        for d in (self.root, self.raw_dir, self.exports_dir, self.vault_dir, self.cache_dir):
             d.mkdir(parents=True, exist_ok=True)
         return self
 

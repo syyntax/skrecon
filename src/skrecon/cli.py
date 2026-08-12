@@ -21,16 +21,20 @@ from typing import Optional
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from . import __version__
 from .audit import AuditLog
+from .cache import Cache
 from .config import IMPLEMENTED_PROVIDERS, KNOWN_API_KEYS, Settings
 from .engagement import EngagementMeta
 from .errors import BlackoutError, NotAuthorizedError, SkreconError
 from .guard import ActiveGate, GuardedExecutor, GuardedHttp, ScopeGuard
 from .model import Asset, AssetKind, Phase
 from .modules.base import REGISTRY, Context
+from .net import PassiveHttp, PassiveResolver
+from .pipeline import run_phase
 from .scope import ScopeParseResult, parse_scope_file, parse_scope_text
 from .store import EngagementStore
 from .workspace import make_engagement_id, open_workspace
@@ -200,10 +204,17 @@ def preflight(
         tool_table.add_row(tool, purpose, status)
     console.print(tool_table)
 
-    console.print(
-        f"\n[bold]Registered recon modules:[/bold] {len(REGISTRY)} "
-        "(Phase 0 ships the core + safety layer; modules land in Phases 1-4)."
-    )
+    mod_table = Table(title="Registered recon modules")
+    mod_table.add_column("module")
+    mod_table.add_column("phase")
+    mod_table.add_column("needs")
+    mod_table.add_column("enabled")
+    for m in REGISTRY.all():
+        needs = ", ".join(list(m.requires_tools) + list(m.requires_keys)) or "-"
+        enabled = settings.module_enabled(m.name, default=getattr(m, "default_enabled", True))
+        mod_table.add_row(m.name, m.phase.value, needs, "yes" if enabled else "no")
+    console.print(mod_table)
+    console.print(f"[dim]{len(REGISTRY)} module(s) registered.[/dim]")
 
 
 @app.command()
@@ -284,6 +295,7 @@ def run(
     engagement_id: str = typer.Option(..., "--engagement", "-e", help="Engagement id."),
     phase: PhaseChoice = typer.Option(PhaseChoice.passive, "--phase", help="Which phase(s) to run."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Plan every action without executing."),
+    fresh: bool = typer.Option(False, "--fresh", help="Ignore checkpoints and re-run completed modules."),
     i_am_authorized: bool = typer.Option(
         False, "--i-am-authorized",
         help="Explicit authorization confirmation required for the ACTIVE phase.",
@@ -291,7 +303,7 @@ def run(
     output_dir: Optional[Path] = typer.Option(None, "--output-dir", help="Override output directory."),
     config: Optional[Path] = typer.Option(None, "--config", "-c", help="Path to skrecon.toml"),
 ) -> None:
-    """Orchestrate an engagement. Phase 0 wires the full safety path (guard + gate)."""
+    """Orchestrate an engagement's passive/active modules through the safety path."""
     overrides: dict = {"output_dir": output_dir} if output_dir else {}
     settings = _load_settings(config, overrides)
 
@@ -313,9 +325,14 @@ def run(
     gate = ActiveGate(authorized=i_am_authorized, audit=audit, engagement=meta)
     executor = GuardedExecutor(guard=guard, gate=gate, audit=audit, dry_run=dry_run)
     http = GuardedHttp(guard=guard, audit=audit, dry_run=dry_run)
+    cache = Cache(ws.cache_dir, ttl_seconds=settings.cache_ttl_hours * 3600)
+    resolver = PassiveResolver(audit=audit, cache=cache, timeout=settings.dns_timeout,
+                               nameservers=settings.dns_nameservers)
+    http_passive = PassiveHttp(audit=audit, cache=cache, timeout=settings.http_timeout)
     ctx = Context(
         settings=settings, engagement=meta, scope=scope, guard=guard, gate=gate,
         executor=executor, http=http, store=store, audit=audit,
+        resolver=resolver, http_passive=http_passive, cache=cache,
     )
 
     phases = {
@@ -345,11 +362,11 @@ def run(
                 gate.ensure_active_allowed()
                 console.print("  [green]authorization gate satisfied.[/green]")
 
-            for m in modules:
-                _run_module(ctx, m, dry_run=dry_run)
-
             if not modules:
-                console.print("  [dim](no modules registered for this phase yet - Phase 1+)[/dim]")
+                console.print("  [dim](no modules registered/enabled for this phase)[/dim]")
+                continue
+
+            run_phase(ctx, modules, dry_run=dry_run, resume=not fresh, on_event=_pipeline_event)
     except NotAuthorizedError as exc:
         console.print(f"\n[red]refused:[/red] {exc}")
         console.print("  provide [bold]--i-am-authorized[/bold] and recorded engagement metadata to run the active phase.")
@@ -361,8 +378,9 @@ def run(
         console.print(f"\n[red]error:[/red] {exc}")
         exit_code = 2
     finally:
-        export = ws.exports_dir / "engagement.json"
-        store.export_json(export)
+        if not dry_run:
+            _print_findings_summary(store)
+        store.export_json(ws.exports_dir / "engagement.json")
         store.close()
 
     console.print(f"\naudit log: {ws.audit_path}")
@@ -371,20 +389,46 @@ def run(
         raise typer.Exit(code=exit_code)
 
 
-def _run_module(ctx: Context, module, *, dry_run: bool) -> None:
-    ready = module.preflight(ctx)
-    if not ready.ready:
-        console.print(f"  [yellow]skip[/yellow] {module.name}: {ready.skipped_reason}")
-        ctx.audit.record(module=module.name, action="preflight", outcome="skipped",
-                         detail=ready.skipped_reason)
+def _pipeline_event(event: dict) -> None:
+    kind = event["kind"]
+    name = event["module"]
+    if kind == "skip":
+        console.print(f"  [yellow]skip[/yellow] {name}: {escape(str(event.get('reason')))}")
+    elif kind == "plan":
+        actions = event.get("actions", [])
+        console.print(f"  [cyan]plan[/cyan] {name}: {len(actions)} action(s)")
+        for a in actions:
+            console.print(f"      - {escape(a.description)}")
+    elif kind == "run":
+        console.print(f"  [green]run[/green]  {name} ...")
+    elif kind == "done":
+        console.print(f"  [green]done[/green] {name}: {event['records']} record(s), "
+                      f"{event['findings']} finding(s)")
+    elif kind == "error":
+        console.print(f"  [red]error[/red] {name}: {escape(str(event.get('reason')))}")
+
+
+_SEV_STYLE = {"critical": "bold red", "high": "red", "medium": "yellow", "low": "cyan", "info": "dim"}
+
+
+def _print_findings_summary(store: EngagementStore) -> None:
+    findings = store.list_findings()
+    if not findings:
         return
-    if dry_run:
-        for action in module.plan(ctx):
-            console.print(f"  [cyan]plan[/cyan] {module.name}: {action.description}")
-        return
-    console.print(f"  [green]run[/green] {module.name}")
-    for _ in module.run(ctx):
-        pass
+    counts: dict[str, int] = {}
+    for f in findings:
+        counts[f["severity"]] = counts.get(f["severity"], 0) + 1
+    order = ["critical", "high", "medium", "low", "info"]
+    summary = "  ".join(
+        f"[{_SEV_STYLE.get(s, '')}]{s}: {counts[s]}[/]" for s in order if s in counts
+    )
+    console.print(f"\n[bold]Findings[/bold] ({len(findings)}):  {summary}")
+    for f in findings[:12]:
+        sev = f["severity"]
+        console.print(f"  [{_SEV_STYLE.get(sev, '')}]{sev:>8}[/] {f['finding_type']:24} "
+                      f"{', '.join(f['affected'])}")
+    if len(findings) > 12:
+        console.print(f"  [dim]... and {len(findings) - 12} more (see export)[/dim]")
 
 
 def _safe_mirror(store: EngagementStore, line: str) -> None:
