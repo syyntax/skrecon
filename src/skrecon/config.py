@@ -119,8 +119,11 @@ class Settings:
     # Include harvested email addresses (theHarvester) in the report body. When
     # false, only aggregate counts + the derived address format are shown.
     report_emails: bool = True
-    # theHarvester sources (no-API-key set by default). Comma-separated.
-    harvester_sources: str = "crtsh,rapiddns,duckduckgo,bing,otx,hackertarget"
+    # theHarvester sources. "all" queries every source (matches `theHarvester -b all`)
+    # and is the most reliable for finding emails; narrow to a comma-separated subset
+    # (e.g. "crtsh,bing,otx") to go faster. Result cap per source via harvester_limit.
+    harvester_sources: str = "all"
+    harvester_limit: int = 500
     retention_days: int = 90
     # passive-recon thresholds / tuning (Phase 1+)
     expiry_warn_days: int = 60           # WHOIS/RDAP "expiring soon" threshold
@@ -178,7 +181,8 @@ class Settings:
                     "scope_resolved_ips", "report_emails"):
             if key in data:
                 setattr(self, key, _as_bool(data[key]))
-        for key in ("max_expanded_hosts", "retention_days", "expiry_warn_days", "cache_ttl_hours"):
+        for key in ("max_expanded_hosts", "retention_days", "expiry_warn_days",
+                    "cache_ttl_hours", "harvester_limit"):
             if key in data:
                 setattr(self, key, int(data[key]))
         for key in ("dns_timeout", "http_timeout"):
@@ -206,6 +210,7 @@ class Settings:
             "SKRECON_SCOPE_RESOLVED_IPS": ("scope_resolved_ips", _as_bool),
             "SKRECON_REPORT_EMAILS": ("report_emails", _as_bool),
             "SKRECON_HARVESTER_SOURCES": ("harvester_sources", str),
+            "SKRECON_HARVESTER_LIMIT": ("harvester_limit", int),
             "SKRECON_RETENTION_DAYS": ("retention_days", int),
             "SKRECON_VERBOSITY": ("verbosity", int),
         }

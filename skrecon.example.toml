@@ -53,9 +53,11 @@ enable_udp  = false   # UDP scanning is slow/disruptive -> top-ports only when e
 # report shows only aggregate counts + the derived address format, and addresses are
 # kept in the encrypted vault (if a passphrase is set). Default true.
 report_emails = true
-# theHarvester sources (comma-separated). Defaults to a no-API-key set. Add key-backed
-# sources (e.g. hunter, github-code) once their env keys are configured.
-harvester_sources = "crtsh,rapiddns,duckduckgo,bing,otx,hackertarget"
+# theHarvester sources. "all" queries every source (equivalent to `theHarvester -b all`)
+# and is the most reliable for finding emails; narrow to a comma-separated subset
+# (e.g. "crtsh,bing,otx") to run faster. harvester_limit caps results per source.
+harvester_sources = "all"
+harvester_limit = 500
 
 # ---- Sensitive-data retention ----
 # Breach/persona PII is stored encrypted-at-rest and excluded from report bodies.

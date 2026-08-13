@@ -22,7 +22,7 @@ from ..model import DomainName, Observation, Phase
 from ..targets import registrable_domain, scope_domains
 from .base import REGISTRY, Action, Readiness
 
-_TIMEOUT = 300
+_TIMEOUT = 600   # `-b all` queries many sources; give it room
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 
 
@@ -92,8 +92,10 @@ class HarvesterModule:
         domains = self._domains(ctx)
         sources = ctx.settings.harvester_sources
         return [Action(
-            description=f"theHarvester ({sources}) for {len(domains)} domain(s)",
-            phase=Phase.PASSIVE, targets=domains)]
+            description=f"theHarvester (-b {sources} -l {ctx.settings.harvester_limit}) "
+                        f"for {len(domains)} domain(s)",
+            phase=Phase.PASSIVE, targets=domains,
+            command=f"theHarvester -d <domain> -b {sources} -l {ctx.settings.harvester_limit}")]
 
     def run(self, ctx) -> Iterable:
         cmd = self._bin()
@@ -134,7 +136,10 @@ class HarvesterModule:
         raw_root.mkdir(parents=True, exist_ok=True)
         base = raw_root / _safe_name(domain)
         sources = ctx.settings.harvester_sources
-        argv = [*cmd, "-d", domain, "-b", sources, "-f", str(base)]
+        limit = str(ctx.settings.harvester_limit)
+        # Mirror the operator's working command: `theHarvester -d <d> -b all -l 500`,
+        # plus -f to persist machine-readable output alongside the console text.
+        argv = [*cmd, "-d", domain, "-b", sources, "-l", limit, "-f", str(base)]
         try:
             proc = subprocess.run(argv, capture_output=True, text=True, timeout=_TIMEOUT)
         except (OSError, subprocess.SubprocessError) as exc:
@@ -151,15 +156,18 @@ class HarvesterModule:
         except OSError:
             pass
 
-        data = self._load_json(base, raw_root)
-        if data is None:
-            # Some versions/sources fail to write JSON; scrape emails from stdout.
-            data = {"emails": _EMAIL_RE.findall(proc.stdout or ""), "hosts": []}
+        # Union the structured JSON with anything printed to stdout: different
+        # theHarvester versions/sources populate one but not always the other.
+        data = self._load_json(base, raw_root) or {}
+        merged = set(str(e).lower() for e in (data.get("emails") or []))
+        merged.update(e.lower() for e in _EMAIL_RE.findall(proc.stdout or ""))
+        data["emails"] = sorted(merged)
 
-        found = len(_emails_for_domain(data.get("emails") or [], domain))
+        found = len(_emails_for_domain(data["emails"], domain))
         ctx.audit.record(module=self.name, action="harvest",
                          outcome="ok" if found else "empty",
-                         target=domain, detail=f"emails={found} rc={proc.returncode}")
+                         target=domain,
+                         detail=f"emails={found} sources={sources} rc={proc.returncode}")
         return data
 
     @staticmethod

@@ -36,10 +36,18 @@ def test_scope_and_email_toggles_from_env():
         "SKRECON_SCOPE_RESOLVED_IPS": "false",
         "SKRECON_REPORT_EMAILS": "0",
         "SKRECON_HARVESTER_SOURCES": "crtsh,bing",
+        "SKRECON_HARVESTER_LIMIT": "200",
     })
     assert s.scope_resolved_ips is False
     assert s.report_emails is False
     assert s.harvester_sources == "crtsh,bing"
+    assert s.harvester_limit == 200
+
+
+def test_harvester_defaults_to_all_sources():
+    s = Settings.load(None, env={})
+    assert s.harvester_sources == "all"
+    assert s.harvester_limit == 500
 
 
 def test_file_overrides_defaults(tmp_path):
