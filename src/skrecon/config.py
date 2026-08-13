@@ -33,6 +33,42 @@ IMPLEMENTED_PROVIDERS = {"shodan", "dehashed"}
 MASSCAN_PPS_WARN_THRESHOLD = 20000
 
 
+def load_env_file(path: str | Path = ".env", *, override: bool = False) -> list[str]:
+    """Load KEY=VALUE lines from a .env file into os.environ.
+
+    A convenience so operators don't have to `source` the file. Real environment
+    variables take precedence unless override=True (least surprise). Handles
+    comments, blank lines, `export ` prefixes, surrounding quotes, and a BOM.
+    Returns the variable NAMES loaded (never values).
+    """
+    p = Path(path)
+    if not p.exists():
+        return []
+    try:
+        text = p.read_text(encoding="utf-8-sig")   # utf-8-sig tolerates a BOM
+    except OSError:
+        return []
+    loaded: list[str] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].strip()
+        if "=" not in line:
+            continue
+        key, val = line.split("=", 1)
+        key, val = key.strip(), val.strip()
+        if len(val) >= 2 and val[0] == val[-1] and val[0] in ("'", '"'):
+            val = val[1:-1]
+        if not key:
+            continue
+        if override or key not in os.environ:
+            os.environ[key] = val
+            loaded.append(key)
+    return loaded
+
+
 @dataclass
 class RateConfig:
     masscan_pps: int = 1000

@@ -29,7 +29,7 @@ from rich.table import Table
 from . import __version__
 from .audit import AuditLog
 from .cache import Cache
-from .config import IMPLEMENTED_PROVIDERS, KNOWN_API_KEYS, Settings
+from .config import IMPLEMENTED_PROVIDERS, KNOWN_API_KEYS, Settings, load_env_file
 from .diff import diff_engagements, render_diff_text
 from .engagement import EngagementMeta
 from .errors import BlackoutError, NotAuthorizedError, SkreconError
@@ -50,6 +50,23 @@ app = typer.Typer(
     help="birdseye / skrecon - authorized recon orchestrator for Stormkeep engagements.",
 )
 console = Console()
+
+# Set by the app callback so preflight can report where keys came from.
+_ENV_SOURCE: Optional[tuple[Path, int]] = None
+
+
+@app.callback()
+def _bootstrap(
+    env_file: Optional[Path] = typer.Option(
+        None, "--env-file", help="Path to a .env file to load (default: ./.env)."),
+) -> None:
+    """Load .env before any command so API keys / the vault passphrase are picked up.
+    Real environment variables always take precedence over the file."""
+    global _ENV_SOURCE
+    path = env_file or Path(os.environ.get("SKRECON_ENV_FILE", ".env"))
+    loaded = load_env_file(path)
+    if loaded:
+        _ENV_SOURCE = (path, len(loaded))
 
 # External tools wrapped in later phases; preflight reports their availability now.
 KNOWN_TOOLS: dict[str, str] = {
@@ -175,6 +192,10 @@ def preflight(
 ) -> None:
     """Report configuration, API-key, and external-tool readiness."""
     settings = _load_settings(config)
+
+    if _ENV_SOURCE:
+        console.print(f"[dim]loaded {_ENV_SOURCE[1]} var(s) from {_ENV_SOURCE[0]} "
+                      "(real environment variables take precedence)[/dim]")
 
     cfg_table = Table(title="Configuration", show_header=False)
     cfg_table.add_row("output_dir", str(settings.output_dir))

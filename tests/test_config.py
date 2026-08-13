@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
-from skrecon.config import RateConfig, Settings
+from skrecon.config import RateConfig, Settings, load_env_file
 
 
 def write_toml(tmp_path: Path) -> Path:
@@ -70,3 +71,35 @@ def test_masscan_rate_warning():
     s = Settings(rates=RateConfig(masscan_pps=30000))
     assert s.masscan_rate_warning() is not None
     assert Settings(rates=RateConfig(masscan_pps=1000)).masscan_rate_warning() is None
+
+
+def test_load_env_file_parses(tmp_path, monkeypatch):
+    env = tmp_path / ".env"
+    env.write_text(
+        "# a comment\n\n"
+        "SHODAN_API_KEY=abc123\n"
+        "export DEHASHED_EMAIL='a@b.c'\n"
+        'QUOTED="hello world"\n',
+        encoding="utf-8",
+    )
+    for var in ("SHODAN_API_KEY", "DEHASHED_EMAIL", "QUOTED"):
+        monkeypatch.delenv(var, raising=False)
+    loaded = load_env_file(env)
+    assert set(loaded) == {"SHODAN_API_KEY", "DEHASHED_EMAIL", "QUOTED"}
+    assert os.environ["SHODAN_API_KEY"] == "abc123"
+    assert os.environ["DEHASHED_EMAIL"] == "a@b.c"      # export + quotes stripped
+    assert os.environ["QUOTED"] == "hello world"
+
+
+def test_load_env_file_real_env_wins(tmp_path, monkeypatch):
+    env = tmp_path / ".env"
+    env.write_text("SHODAN_API_KEY=fromfile\n", encoding="utf-8")
+    monkeypatch.setenv("SHODAN_API_KEY", "fromenv")
+    assert "SHODAN_API_KEY" not in load_env_file(env)   # not overridden
+    assert os.environ["SHODAN_API_KEY"] == "fromenv"
+    load_env_file(env, override=True)                    # explicit override does replace
+    assert os.environ["SHODAN_API_KEY"] == "fromfile"
+
+
+def test_load_env_file_missing_is_noop(tmp_path):
+    assert load_env_file(tmp_path / "nope.env") == []
