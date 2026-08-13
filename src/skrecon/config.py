@@ -97,6 +97,10 @@ def _as_bool(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _csv_list(value: str) -> list[str]:
+    return [x.strip() for x in str(value).split(",") if x.strip()]
+
+
 @dataclass
 class Settings:
     output_dir: Path = Path("engagements")
@@ -182,6 +186,8 @@ class Settings:
         mapping = {
             "SKRECON_OUTPUT_DIR": ("output_dir", Path),
             "SKRECON_CLIENT": ("client", str),
+            "SKRECON_CLIENT_ROOT_DOMAINS": ("client_root_domains", _csv_list),
+            "SKRECON_CLIENT_KEYWORDS": ("client_keywords", _csv_list),
             "SKRECON_INCLUDE_SUBDOMAINS": ("include_subdomains", _as_bool),
             "SKRECON_MAX_EXPANDED_HOSTS": ("max_expanded_hosts", int),
             "SKRECON_ENABLE_AXFR": ("enable_axfr", _as_bool),

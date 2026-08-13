@@ -14,7 +14,13 @@ output_dir = "engagements"
 # the ACTIVE target set.
 client = "Example Corp"
 
-# Extra client-owned root domains / brand keywords to widen PASSIVE collection.
+# Client-owned root domains + brand keywords used ONLY for passive reconnaissance
+# (DNS/mail/WHOIS/CT-subdomains/typosquat/breach/harvesting). Example: your active
+# scope.txt target is buyexample.com, but you also want passive intel on the main
+# brand domain example.com — list it here. These NEVER enter the scope guard, so no
+# active module (masscan/nmap/TLS/headers/...) can touch them; active recon still
+# runs ONLY against hosts resolved from or listed in scope.txt.
+#   (Also settable via SKRECON_CLIENT_ROOT_DOMAINS="example.com,example.net".)
 client_root_domains = ["example.com", "example.net"]
 client_keywords = ["examplecorp", "exmpl"]
 

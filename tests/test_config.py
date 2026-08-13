@@ -103,3 +103,8 @@ def test_load_env_file_real_env_wins(tmp_path, monkeypatch):
 
 def test_load_env_file_missing_is_noop(tmp_path):
     assert load_env_file(tmp_path / "nope.env") == []
+
+
+def test_client_root_domains_from_env():
+    s = Settings.load(None, env={"SKRECON_CLIENT_ROOT_DOMAINS": "example.com, example.net"})
+    assert s.client_root_domains == ["example.com", "example.net"]

@@ -28,7 +28,13 @@ class DnsModule:
     default_enabled = True
 
     def _hosts(self, ctx) -> list[str]:
-        return sorted(ctx.scope.hostnames)
+        # scope.txt hostnames (active-eligible) PLUS the client's root domains,
+        # which are passive-only: resolving them is passive, and their IPs are
+        # marked out-of-scope below so no active module can ever target them.
+        names = set(ctx.scope.hostnames)
+        names.update(d.strip().strip(".").lower()
+                     for d in ctx.settings.client_root_domains if d.strip())
+        return sorted(names)
 
     def preflight(self, ctx) -> Readiness:
         if not ctx.resolver.available():
@@ -60,7 +66,7 @@ class DnsModule:
                         yield ResolutionEdge(src=host, via=value.rstrip("."), dst=value.rstrip("."))
 
             yield DomainName(fqdn=host, registrable_domain=registrable_domain(host),
-                             is_scope=True, resolves=resolved)
+                             is_scope=ctx.scope.contains_host(host), resolves=resolved)
             if not resolved:
                 yield make_finding("dns.no_resolution", affected=[host],
                                    evidence=["no A/AAAA records"], source_module=self.name,
