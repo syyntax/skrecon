@@ -96,6 +96,18 @@ docker run --rm -v "$PWD/engagements:/engagements" --env-file .env \
     --cap-add=NET_RAW stormkeep/skrecon run -e <id> --phase active --i-am-authorized
 ```
 
+**Build-network note.** If the build fails while downloading Go modules with
+`connection reset by peer` — small modules succeed but a larger one keeps resetting,
+and `go install` works fine on the host — it's the Docker **build network**, not the
+Dockerfile (usually an MTU mismatch on a VM/VPN). Build using the host network:
+
+```bash
+docker build --network=host -t stormkeep/skrecon .
+```
+
+Permanent fix: match Docker's MTU to the host's (find it with `ip link show | grep mtu`)
+in `/etc/docker/daemon.json` — e.g. `{ "mtu": 1400 }` — then restart Docker.
+
 ## Safety model (Phase 0)
 
 - **Scope guard** lives in the core: modules reach the network only through a guarded executor /
