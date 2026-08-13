@@ -432,6 +432,10 @@ class EngagementStore:
     def list_domains(self) -> list[dict[str, Any]]:
         return [dict(r) for r in self.conn.execute("SELECT * FROM domain ORDER BY fqdn").fetchall()]
 
+    def list_resolution_edges(self) -> list[dict[str, Any]]:
+        return [dict(r) for r in
+                self.conn.execute("SELECT * FROM resolution_edge ORDER BY id").fetchall()]
+
     def list_certificates(self) -> list[dict[str, Any]]:
         rows = self.conn.execute("SELECT * FROM certificate ORDER BY not_after DESC").fetchall()
         out = []

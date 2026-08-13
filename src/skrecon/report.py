@@ -62,7 +62,28 @@ def build_report_model(store: EngagementStore) -> dict[str, Any]:
         "certificates": store.list_certificates(),
         "exposures": store.list_exposures(),
         "screenshots": store.list_observations("screenshot"),
+        "emails": _group_emails(store.list_observations("email")),
+        "persona_summaries": store.list_observations("persona-summary"),
     }
+
+
+def _group_emails(observations: list) -> list[dict[str, Any]]:
+    """Group harvested email observations by domain, most-in-scope first."""
+    by_domain: dict[str, dict[str, Any]] = {}
+    for o in observations:
+        data = o.get("data") or {}
+        email = data.get("email")
+        if not email:
+            continue
+        domain = data.get("domain") or o.get("subject") or ""
+        entry = by_domain.setdefault(
+            domain, {"domain": domain, "in_scope": bool(data.get("in_scope")), "emails": set()})
+        entry["emails"].add(email)
+        entry["in_scope"] = entry["in_scope"] or bool(data.get("in_scope"))
+    out = [{"domain": d["domain"], "in_scope": d["in_scope"], "emails": sorted(d["emails"])}
+           for d in by_domain.values()]
+    out.sort(key=lambda d: (not d["in_scope"], d["domain"]))
+    return out
 
 
 def _sev_sorted(findings: list) -> list:
@@ -146,6 +167,31 @@ def render_markdown(model: dict[str, Any]) -> str:
             if f.get("remediation"):
                 w(f"- **Remediation:** {f['remediation']}")
             w(f"- **Source:** {f['source_module']}\n")
+
+    # Harvested email addresses (OSINT)
+    w("## Email Addresses (OSINT)\n")
+    if model["emails"]:
+        total = sum(len(e["emails"]) for e in model["emails"])
+        w(f"> {total} address(es) harvested from public sources (theHarvester) for the "
+          "client brand and in-scope domains.\n")
+        w("| Domain | Scope | Email |")
+        w("|--------|-------|-------|")
+        for e in model["emails"]:
+            tag = "in-scope" if e["in_scope"] else "client brand"
+            for addr in e["emails"]:
+                w(f"| {e['domain']} | {tag} | {addr} |")
+        w("")
+    elif model["persona_summaries"]:
+        w("> Emails were harvested and stored encrypted; addresses are omitted from the "
+          "report body (report_emails disabled). Counts only:\n")
+        w("| Domain | Emails | Likely format |")
+        w("|--------|--------|---------------|")
+        for o in model["persona_summaries"]:
+            d = o["data"]
+            w(f"| {o['subject']} | {d.get('emails', 0)} | {d.get('email_format') or ''} |")
+        w("")
+    else:
+        w("_No email addresses harvested (or theHarvester not run)._\n")
 
     # Breach exposure (counts only)
     w("## Breach & Credential Exposure\n")
@@ -251,6 +297,29 @@ def render_html(model: dict[str, Any]) -> str:
             if f.get("remediation"):
                 w(f"<div>Remediation: {_e(f['remediation'])}</div>")
             w(f"<div class='meta'>Source: {_e(f['source_module'])}</div></div>")
+
+    w("<h2>Email Addresses (OSINT)</h2>")
+    if model["emails"]:
+        total = sum(len(e["emails"]) for e in model["emails"])
+        w(f"<div class='note'>{total} address(es) harvested from public sources "
+          "(theHarvester) for the client brand and in-scope domains.</div>")
+        w("<table><tr><th>Domain</th><th>Scope</th><th>Email</th></tr>")
+        for e in model["emails"]:
+            tag = "in-scope" if e["in_scope"] else "client brand"
+            for addr in e["emails"]:
+                w(f"<tr><td>{_e(e['domain'])}</td><td>{_e(tag)}</td><td>{_e(addr)}</td></tr>")
+        w("</table>")
+    elif model["persona_summaries"]:
+        w("<div class='note'>Emails were harvested and stored encrypted; addresses are "
+          "omitted from the report body (report_emails disabled). Counts only.</div>")
+        w("<table><tr><th>Domain</th><th>Emails</th><th>Likely format</th></tr>")
+        for o in model["persona_summaries"]:
+            d = o["data"]
+            w(f"<tr><td>{_e(o['subject'])}</td><td>{_e(d.get('emails', 0))}</td>"
+              f"<td>{_e(d.get('email_format'))}</td></tr>")
+        w("</table>")
+    else:
+        w("<p><em>No email addresses harvested (or theHarvester not run).</em></p>")
 
     w("<h2>Breach &amp; Credential Exposure</h2>")
     if model["exposures"]:

@@ -27,6 +27,19 @@ def test_defaults():
     assert s.retention_days == 90
     assert s.include_subdomains is False
     assert s.output_dir == Path("engagements")
+    assert s.scope_resolved_ips is True       # resolved IPs of scoped hosts are in-scope
+    assert s.report_emails is True
+
+
+def test_scope_and_email_toggles_from_env():
+    s = Settings.load(None, env={
+        "SKRECON_SCOPE_RESOLVED_IPS": "false",
+        "SKRECON_REPORT_EMAILS": "0",
+        "SKRECON_HARVESTER_SOURCES": "crtsh,bing",
+    })
+    assert s.scope_resolved_ips is False
+    assert s.report_emails is False
+    assert s.harvester_sources == "crtsh,bing"
 
 
 def test_file_overrides_defaults(tmp_path):

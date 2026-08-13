@@ -53,12 +53,19 @@ class DnsModule:
     def run(self, ctx) -> Iterable:
         seen_zone: set[str] = set()
         for host in self._hosts(ctx):
+            # A scope.txt hostname's resolved IPs become active-eligible (policy:
+            # scope_resolved_ips). client_root_domains are NOT in scope.hostnames, so
+            # contains_host is False and their IPs are never registered — they remain
+            # passive-only, exactly as before.
+            host_in_scope = ctx.scope.contains_host(host)
             resolved = False
             for rtype in RECORD_TYPES:
                 for value in ctx.resolver.resolve(host, rtype):
                     yield DnsRecord(domain=host, rtype=rtype, value=value)
                     if rtype in ("A", "AAAA"):
                         resolved = True
+                        if host_in_scope:
+                            ctx.scope.add_resolved_ip(value)
                         yield HostIP(ip=value, version=6 if ":" in value else 4,
                                      in_scope=ctx.scope.contains_ip(value))
                         yield ResolutionEdge(src=host, via=None, dst=value)

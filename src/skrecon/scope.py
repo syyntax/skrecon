@@ -50,11 +50,23 @@ class ScopeEntry:
 
 @dataclass
 class ResolvedScope:
-    """The immutable membership authority derived from scope.txt."""
+    """The membership authority derived from scope.txt.
+
+    The scope.txt-listed hostnames and networks are immutable. In addition, IPs
+    that a listed HOSTNAME resolves to are registered at run time via
+    `add_resolved_ip` and (when `resolve_ips_in_scope` is enabled) are treated as
+    in-scope for active modules — so listing `example.com` authorizes scanning the
+    IP it resolves to without also having to list that IP. This is deliberately the
+    only way the in-scope IP set grows beyond scope.txt, and it is gated by policy.
+    """
     hostnames: frozenset[str]
     parent_domains: frozenset[str]           # listed hostnames usable as subdomain parents
     networks: tuple[Network, ...]
     max_expanded_hosts: int = DEFAULT_MAX_EXPANDED_HOSTS
+    # Policy: does a listed hostname's resolved IP become active-eligible?
+    resolve_ips_in_scope: bool = True
+    # IPs a listed hostname resolved to (populated at run time; not from scope.txt).
+    _resolved_ips: set[str] = field(default_factory=set)
 
     # -- membership --------------------------------------------------------- #
     def contains_host(self, name: str, *, include_subdomains: bool = False) -> bool:
@@ -75,7 +87,30 @@ class ResolvedScope:
         except ValueError:
             return False
         # ip_network.__contains__ returns False on version mismatch — safe.
-        return any(addr in net for net in self.networks)
+        if any(addr in net for net in self.networks):
+            return True
+        # An IP a listed hostname resolved to is in-scope only under the policy.
+        return self.resolve_ips_in_scope and str(addr) in self._resolved_ips
+
+    def add_resolved_ip(self, ip: str) -> bool:
+        """Register an IP that a listed hostname resolved to. Returns True if it was
+        newly added. A no-op (returns False) when the policy is disabled or the value
+        is not a valid IP. Callers must only pass IPs of IN-SCOPE hostnames — this is
+        the sole sanctioned way the active-eligible IP set grows past scope.txt."""
+        if not self.resolve_ips_in_scope:
+            return False
+        try:
+            norm = str(ipaddress.ip_address(ip.strip()))
+        except ValueError:
+            return False
+        if norm in self._resolved_ips:
+            return False
+        self._resolved_ips.add(norm)
+        return True
+
+    def resolved_ip_list(self) -> list[str]:
+        """IPs currently in-scope by resolution (for reporting / operator review)."""
+        return sorted(self._resolved_ips)
 
     def contains_network(self, net: Network) -> bool:
         """True only if `net` is fully contained within an in-scope network.

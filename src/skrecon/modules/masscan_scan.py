@@ -26,10 +26,12 @@ class MasscanModule:
     default_enabled = True
 
     def _targets(self, ctx) -> list[str]:
-        """In-scope networks (CIDR) + in-scope discovered IPs. The guarded executor
-        re-validates each against scope before running, so this is defense-in-depth."""
+        """In-scope networks (CIDR) + discovered IPs that are in scope. Membership is
+        asked of the scope directly (which knows both listed networks and the IPs that
+        listed hostnames resolved to), so a stale stored flag can't hide a target. The
+        guarded executor re-validates each before running — defense-in-depth."""
         targets = [str(n) for n in ctx.scope.networks]
-        targets += [h["ip"] for h in ctx.store.list_hosts() if h.get("in_scope")]
+        targets += [h["ip"] for h in ctx.store.list_hosts() if ctx.scope.contains_ip(h["ip"])]
         seen: set[str] = set()
         out: list[str] = []
         for t in targets:

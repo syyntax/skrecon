@@ -113,12 +113,21 @@ in `/etc/docker/daemon.json` — e.g. `{ "mtu": 1400 }` — then restart Docker.
 - **Scope guard** lives in the core: modules reach the network only through a guarded executor /
   HTTP client that refuses any out-of-scope target, logs the refusal, and continues. No module can
   bypass it.
+- **Resolved-IP scoping** (`scope_resolved_ips`, on by default): an IP that a `scope.txt` hostname
+  resolves to is active-eligible — listing `buyexample.com` authorizes scanning the IP it resolves
+  to without also listing that IP. `client_root_domains` are excluded (passive-only). The active
+  phase prints the resolution-derived IPs with a reminder to confirm they are client-owned (not a
+  shared CDN). Set `scope_resolved_ips = false` for the strict "only IPs written in scope.txt"
+  posture.
 - **Authorization gate**: the active phase refuses to run without recorded engagement metadata plus
   an explicit `--i-am-authorized` confirmation.
 - **Blackout windows**: active scanning is refused during configured windows.
 - **`--dry-run`**: prints every target and action with zero execution.
-- **PII hygiene**: breach/persona data is stored encrypted-at-rest, excluded from report bodies, and
-  auto-purged at engagement close per `retention_days`.
+- **PII hygiene**: breach/credential records are always stored encrypted-at-rest, excluded from
+  report bodies (counts only), and auto-purged at engagement close per `retention_days`. Harvested
+  **email addresses** are shown in the report by default (`report_emails`, for the client brand and
+  in-scope domains) and, when a vault passphrase is set, also kept encrypted; set
+  `report_emails = false` to keep only counts in the report.
 
 ## Tests
 

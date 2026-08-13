@@ -109,6 +109,32 @@ def _load_settings(config: Optional[Path], overrides: Optional[dict] = None) -> 
         raise typer.Exit(code=2)
 
 
+def _is_ip_literal(value: str) -> bool:
+    import ipaddress
+    try:
+        ipaddress.ip_address(value.strip())
+        return True
+    except ValueError:
+        return False
+
+
+def _seed_resolved_ips(scope, store: EngagementStore, settings: Settings) -> list[str]:
+    """Register IPs that in-scope hostnames resolved to (from persisted DNS edges),
+    so active membership survives across separate invocations. Returns the IPs added."""
+    if not settings.scope_resolved_ips:
+        return []
+    added: list[str] = []
+    for edge in store.list_resolution_edges():
+        dst = str(edge.get("dst") or "")
+        src = str(edge.get("src") or "")
+        if _is_ip_literal(dst) and scope.contains_host(
+            src, include_subdomains=settings.include_subdomains
+        ):
+            if scope.add_resolved_ip(dst):
+                added.append(dst)
+    return added
+
+
 def _assets_from_scope(result: ScopeParseResult) -> list[Asset]:
     assets: list[Asset] = []
     for e in result.entries:
@@ -201,6 +227,8 @@ def preflight(
     cfg_table.add_row("output_dir", str(settings.output_dir))
     cfg_table.add_row("client", settings.client or "[dim]unset[/dim]")
     cfg_table.add_row("include_subdomains", str(settings.include_subdomains))
+    cfg_table.add_row("scope_resolved_ips", str(settings.scope_resolved_ips))
+    cfg_table.add_row("report_emails", str(settings.report_emails))
     cfg_table.add_row("max_expanded_hosts", str(settings.max_expanded_hosts))
     cfg_table.add_row("enable_axfr / enable_udp", f"{settings.enable_axfr} / {settings.enable_udp}")
     cfg_table.add_row("retention_days", str(settings.retention_days))
@@ -347,9 +375,16 @@ def run(
     meta = ws.read_meta()
     result = parse_scope_text(ws.read_scope_text(), max_expanded_hosts=settings.max_expanded_hosts)
     scope = result.scope
+    scope.resolve_ips_in_scope = settings.scope_resolved_ips
 
     store = EngagementStore(ws.db_path)
     audit = AuditLog(ws.audit_path, secrets=settings.secret_values())
+
+    # Re-seed the resolved-in-scope IP set from persisted DNS edges so that a
+    # separate `--phase active` invocation honors the IPs that scope.txt hostnames
+    # resolved to during the earlier passive run (within `--phase all` the dns
+    # module populates it live as it resolves).
+    _seed_resolved_ips(scope, store, settings)
     # Mirror audit lines into the DB for queryability (best-effort).
     audit.echo = lambda line: _safe_mirror(store, line)
 
@@ -405,6 +440,15 @@ def run(
                 # Enforce the authorization + blackout gate before any active work.
                 gate.ensure_active_allowed()
                 console.print("  [green]authorization gate satisfied.[/green]")
+
+            if ph is Phase.ACTIVE:
+                rips = scope.resolved_ip_list()
+                if rips:
+                    console.print(f"  [dim]in-scope by resolution ({len(rips)}):[/dim] "
+                                  f"{escape(', '.join(rips))}")
+                    console.print("  [yellow]note:[/yellow] these IPs are active-eligible because "
+                                  "in-scope hostnames resolve to them. Confirm they are client-owned "
+                                  "(not shared CDN/hosting) before active scanning.")
 
             if not modules:
                 console.print("  [dim](no modules registered/enabled for this phase)[/dim]")

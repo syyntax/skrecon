@@ -111,6 +111,16 @@ class Settings:
     max_expanded_hosts: int = 65536
     enable_axfr: bool = False
     enable_udp: bool = False
+    # When true, an IP that a scope.txt HOSTNAME resolves to is treated as in-scope
+    # for ACTIVE modules (masscan/nmap/TLS/headers/...). client_root_domains are
+    # unaffected — they are never in scope.hostnames, so they stay passive-only.
+    # Turn off for the conservative posture where only listed IPs/CIDRs are active.
+    scope_resolved_ips: bool = True
+    # Include harvested email addresses (theHarvester) in the report body. When
+    # false, only aggregate counts + the derived address format are shown.
+    report_emails: bool = True
+    # theHarvester sources (no-API-key set by default). Comma-separated.
+    harvester_sources: str = "crtsh,rapiddns,duckduckgo,bing,otx,hackertarget"
     retention_days: int = 90
     # passive-recon thresholds / tuning (Phase 1+)
     expiry_warn_days: int = 60           # WHOIS/RDAP "expiring soon" threshold
@@ -158,13 +168,14 @@ class Settings:
 
         if "output_dir" in data:
             self.output_dir = Path(str(data["output_dir"]))
-        for key in ("client", "masscan_ports"):
+        for key in ("client", "masscan_ports", "harvester_sources"):
             if key in data:
                 setattr(self, key, str(data[key]))
         for key in ("client_root_domains", "client_keywords"):
             if key in data:
                 setattr(self, key, [str(x) for x in data[key]])
-        for key in ("include_subdomains", "enable_axfr", "enable_udp"):
+        for key in ("include_subdomains", "enable_axfr", "enable_udp",
+                    "scope_resolved_ips", "report_emails"):
             if key in data:
                 setattr(self, key, _as_bool(data[key]))
         for key in ("max_expanded_hosts", "retention_days", "expiry_warn_days", "cache_ttl_hours"):
@@ -192,6 +203,9 @@ class Settings:
             "SKRECON_MAX_EXPANDED_HOSTS": ("max_expanded_hosts", int),
             "SKRECON_ENABLE_AXFR": ("enable_axfr", _as_bool),
             "SKRECON_ENABLE_UDP": ("enable_udp", _as_bool),
+            "SKRECON_SCOPE_RESOLVED_IPS": ("scope_resolved_ips", _as_bool),
+            "SKRECON_REPORT_EMAILS": ("report_emails", _as_bool),
+            "SKRECON_HARVESTER_SOURCES": ("harvester_sources", str),
             "SKRECON_RETENTION_DAYS": ("retention_days", int),
             "SKRECON_VERBOSITY": ("verbosity", int),
         }

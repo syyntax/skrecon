@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from skrecon.engagement import EngagementMeta
 from skrecon.findings import make_finding
-from skrecon.model import Exposure, ExposureFormat, HostIP, Service, ServiceSource
+from skrecon.model import Exposure, ExposureFormat, HostIP, Observation, Service, ServiceSource
 from skrecon.report import build_report_model, render_html, render_markdown
 from skrecon.store import EngagementStore
 
@@ -45,6 +45,39 @@ def test_markdown_render(tmp_path):
     assert "BreachA" in md
     # Exposure is counts-only; the vault note must be present.
     assert "encrypted vault" in md
+
+
+def test_report_shows_harvested_emails(tmp_path):
+    store = seed(tmp_path)
+    store.persist(Observation(subject="cyberhacktics.com", kind="email",
+                              data={"email": "admin@cyberhacktics.com",
+                                    "domain": "cyberhacktics.com", "in_scope": True}))
+    store.persist(Observation(subject="cyberhacktics.org", kind="email",
+                              data={"email": "press@cyberhacktics.org",
+                                    "domain": "cyberhacktics.org", "in_scope": False}))
+    model = build_report_model(store)
+    # grouped, in-scope domain first
+    assert [g["domain"] for g in model["emails"]] == ["cyberhacktics.com", "cyberhacktics.org"]
+
+    md = render_markdown(model)
+    assert "## Email Addresses (OSINT)" in md
+    assert "admin@cyberhacktics.com" in md
+    assert "press@cyberhacktics.org" in md
+    assert "client brand" in md            # client-root labeling
+
+    html = render_html(model)
+    assert "Email Addresses (OSINT)" in html
+    assert "admin@cyberhacktics.com" in html
+
+
+def test_report_emails_counts_only_fallback(tmp_path):
+    store = seed(tmp_path)
+    store.persist(Observation(subject="cyberhacktics.com", kind="persona-summary",
+                              data={"emails": 4, "email_format": "first.last@cyberhacktics.com"}))
+    md = render_markdown(build_report_model(store))
+    assert "## Email Addresses (OSINT)" in md
+    assert "first.last@cyberhacktics.com" in md
+    assert "admin@" not in md               # no raw addresses when only counts exist
 
 
 def test_html_render_is_escaped_and_structured(tmp_path):
