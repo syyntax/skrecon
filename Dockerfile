@@ -5,13 +5,15 @@
 # Pin tool versions in a real build; @latest is used here for clarity.
 
 # ---- Stage 1: fetch the ProjectDiscovery / Go tools ----
-# These are pulled through the Go module proxy. A "proxy.golang.org ... connection
-# reset by peer" failure is a NETWORK issue reaching the proxy, not a Dockerfile bug.
-# The retry loop rides out transient resets; GOPROXY is overridable for restricted
-# networks, for example:
-#   docker build --build-arg GOPROXY=direct .                  # straight from GitHub
-#   docker build --build-arg HTTPS_PROXY=http://host:8080 .    # behind a corporate proxy
-FROM golang:1.22-bookworm AS gotools
+# Use a Go base that already meets the tools' minimum (subfinder/nuclei currently
+# need Go >= 1.25). With an older base, `go install` auto-downloads a newer toolchain
+# mid-build (go: "switching to go1.25.x; downloading ...") — an extra large fetch that
+# made builds flaky/reset. A recent base removes that step entirely.
+# The retry loop still rides out transient resets; GOPROXY is overridable, e.g.
+#   docker build --build-arg GOPROXY=direct .
+# If the build network itself drops large transfers (host works but the build resets,
+# e.g. an MTU mismatch under a VPN), try:  docker build --network=host .
+FROM golang:1.25-bookworm AS gotools
 ARG GOPROXY=https://proxy.golang.org,direct
 ENV GOPROXY=${GOPROXY}
 # Pin versions in a real build (e.g. subfinder@v2.6.6); @latest is used here for clarity.
