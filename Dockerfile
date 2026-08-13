@@ -4,11 +4,23 @@
 # and some passive modules orchestrate, so an engagement runs identically anywhere.
 # Pin tool versions in a real build; @latest is used here for clarity.
 
-# ---- Stage 1: build the ProjectDiscovery / Go tools ----
+# ---- Stage 1: fetch the ProjectDiscovery / Go tools ----
+# These are pulled through the Go module proxy. A "proxy.golang.org ... connection
+# reset by peer" failure is a NETWORK issue reaching the proxy, not a Dockerfile bug.
+# The retry loop rides out transient resets; GOPROXY is overridable for restricted
+# networks, for example:
+#   docker build --build-arg GOPROXY=direct .                  # straight from GitHub
+#   docker build --build-arg HTTPS_PROXY=http://host:8080 .    # behind a corporate proxy
 FROM golang:1.22-bookworm AS gotools
-RUN go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest \
- && go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest \
- && go install github.com/sensepost/gowitness@latest
+ARG GOPROXY=https://proxy.golang.org,direct
+ENV GOPROXY=${GOPROXY}
+# Pin versions in a real build (e.g. subfinder@v2.6.6); @latest is used here for clarity.
+RUN set -eu; \
+    retry() { for i in 1 2 3 4 5; do "$@" && return 0; \
+        echo "attempt $i failed; retrying in 10s..."; sleep 10; done; return 1; }; \
+    retry go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest; \
+    retry go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest; \
+    retry go install github.com/sensepost/gowitness@latest
 
 # ---- Stage 2: runtime ----
 FROM python:3.11-slim-bookworm
@@ -29,7 +41,7 @@ COPY . /opt/skrecon
 
 # Install skrecon + its Python tool bindings (dnspython, dnstwist, cryptography,
 # theHarvester, wafw00f). shodan/requests come with the passive extra.
-RUN pip install --no-cache-dir -e ".[passive,vault]" wafw00f theHarvester
+RUN pip install --no-cache-dir --retries 5 --timeout 60 -e ".[passive,vault]" wafw00f theHarvester
 
 # Engagements persist to a mounted volume; secrets come from the environment.
 ENV SKRECON_OUTPUT_DIR=/engagements
